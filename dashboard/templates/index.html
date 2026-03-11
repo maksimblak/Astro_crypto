@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Astro BTC — Reversal Scanner</title>
+<title>AstroBTC — Сканер разворотов</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
@@ -47,7 +47,6 @@
     overflow-x: hidden;
   }
 
-  /* === Animated background === */
   body::before {
     content: '';
     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -61,7 +60,6 @@
 
   .container { max-width: 1480px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
 
-  /* === Top Nav === */
   .topbar {
     background: rgba(17,24,39,0.85);
     backdrop-filter: blur(20px);
@@ -94,7 +92,6 @@
   .nav-pill:hover { color: var(--text); background: var(--bg-hover); }
   .nav-pill.active { color: var(--neon-cyan); background: rgba(0,212,255,0.1); }
 
-  /* === Hero Score Strip === */
   .hero {
     padding: 28px 0 20px;
     display: flex; gap: 16px; flex-wrap: wrap; align-items: stretch;
@@ -141,7 +138,6 @@
   .dir-down { color: var(--bull); }
   .dir-neutral { color: var(--text2); }
 
-  /* === Section / Cards === */
   .section { margin-top: 28px; }
   .section-head {
     display: flex; align-items: center; justify-content: space-between;
@@ -164,7 +160,6 @@
   }
   .card:hover { border-color: rgba(255,255,255,0.1); }
 
-  /* === Filters === */
   .pill-group { display: flex; gap: 4px; flex-wrap: wrap; }
   .pill {
     padding: 5px 14px; border-radius: 8px; font-size: 12px; font-weight: 500;
@@ -177,11 +172,9 @@
     background: rgba(0,212,255,0.08); box-shadow: inset 0 0 12px rgba(0,212,255,0.06);
   }
 
-  /* === Chart === */
   .chart-box { position: relative; height: 380px; margin-top: 12px; }
   .chart-box-lg { height: 440px; }
 
-  /* === Risk Grid === */
   .risk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
   .risk-item {
     background: var(--bg-card2);
@@ -219,7 +212,6 @@
   }
   .risk-details { font-size: 11px; color: var(--text3); margin-top: 6px; line-height: 1.5; }
 
-  /* === Stats === */
   .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
   .stat-block {
     background: var(--bg-card2); border: 1px solid var(--border);
@@ -245,14 +237,12 @@
   .lift-ok { color: var(--warn); font-weight: 600; }
   .lift-meh { color: var(--text2); }
 
-  /* === Footer === */
   .footer {
     text-align: center; padding: 40px 0 24px;
     font-size: 12px; color: var(--text3);
   }
   .footer a { color: var(--neon-cyan); text-decoration: none; }
 
-  /* === Loading === */
   .loading {
     text-align: center; padding: 60px; color: var(--text2); font-size: 14px;
   }
@@ -265,7 +255,6 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* === Pulse animation for live dot === */
   @keyframes pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.5; transform: scale(1.5); }
@@ -275,7 +264,6 @@
     display: inline-block; animation: pulse 2s ease infinite;
   }
 
-  /* === Responsive === */
   @media (max-width: 768px) {
     .hero { flex-direction: column; }
     .hero-main { flex: none; }
@@ -288,7 +276,7 @@
 </head>
 <body>
 
-<!-- Top bar -->
+<!-- Навигация -->
 <div class="topbar">
   <div class="topbar-inner">
     <div class="logo">
@@ -296,30 +284,30 @@
       <div>Astro<span>BTC</span></div>
     </div>
     <div class="nav-pills">
-      <button class="nav-pill active" onclick="scrollTo('#sectionCalendar')">Calendar</button>
-      <button class="nav-pill" onclick="scrollTo('#sectionChart')">Chart</button>
-      <button class="nav-pill" onclick="scrollTo('#sectionRisk')">Risk Zones</button>
-      <button class="nav-pill" onclick="scrollTo('#sectionStats')">Stats</button>
+      <button class="nav-pill active" onclick="scrollTo('#sectionCalendar')">Календарь</button>
+      <button class="nav-pill" onclick="scrollTo('#sectionChart')">График</button>
+      <button class="nav-pill" onclick="scrollTo('#sectionRisk')">Зоны риска</button>
+      <button class="nav-pill" onclick="scrollTo('#sectionStats')">Статистика</button>
     </div>
   </div>
 </div>
 
 <div class="container">
 
-  <!-- Hero strip -->
+  <!-- Главный блок -->
   <div class="hero" id="heroBlock">
     <div class="hero-main">
-      <div class="hero-label"><span class="live-dot"></span> Today's Reversal Score</div>
-      <div class="hero-score cold" id="heroScore">—</div>
-      <div class="hero-sub" id="heroSub">Loading...</div>
+      <div class="hero-label"><span class="live-dot"></span> Балл разворота сегодня</div>
+      <div class="hero-score cold" id="heroScore">&mdash;</div>
+      <div class="hero-sub" id="heroSub">Загрузка...</div>
     </div>
     <div class="hero-cards" id="heroCards"></div>
   </div>
 
-  <!-- Calendar -->
+  <!-- Календарь -->
   <div class="section" id="sectionCalendar">
     <div class="section-head">
-      <div class="section-title"><span class="dot"></span> Astro Calendar</div>
+      <div class="section-title"><span class="dot"></span> Астро-календарь</div>
       <div class="pill-group" id="monthFilters"></div>
     </div>
     <div class="card">
@@ -327,45 +315,45 @@
     </div>
   </div>
 
-  <!-- Price chart -->
+  <!-- График цены -->
   <div class="section" id="sectionChart">
     <div class="section-head">
-      <div class="section-title"><span class="dot" style="background:var(--neon-blue);box-shadow:0 0 20px rgba(59,130,246,0.3)"></span> BTC Price &amp; Pivots</div>
+      <div class="section-title"><span class="dot" style="background:var(--neon-blue);box-shadow:0 0 20px rgba(59,130,246,0.3)"></span> Цена BTC и развороты</div>
     </div>
     <div class="card">
       <div class="chart-box chart-box-lg"><canvas id="priceChart"></canvas></div>
     </div>
   </div>
 
-  <!-- Risk zones -->
+  <!-- Зоны риска -->
   <div class="section" id="sectionRisk">
     <div class="section-head">
-      <div class="section-title"><span class="dot" style="background:var(--bear);box-shadow:var(--glow-red)"></span> Upcoming Risk Zones</div>
+      <div class="section-title"><span class="dot" style="background:var(--bear);box-shadow:var(--glow-red)"></span> Ближайшие зоны риска</div>
     </div>
     <div class="risk-grid" id="riskGrid">
-      <div class="loading">Scanning astro events</div>
+      <div class="loading">Сканирование астро-событий</div>
     </div>
   </div>
 
-  <!-- Stats -->
+  <!-- Статистика -->
   <div class="section" id="sectionStats">
     <div class="section-head">
-      <div class="section-title"><span class="dot" style="background:var(--neon-purple);box-shadow:0 0 20px rgba(139,92,246,0.3)"></span> Model Performance</div>
+      <div class="section-title"><span class="dot" style="background:var(--neon-purple);box-shadow:0 0 20px rgba(139,92,246,0.3)"></span> Эффективность модели</div>
     </div>
     <div class="card" id="statsBlock">
-      <div class="loading">Crunching numbers</div>
+      <div class="loading">Подсчёт статистики</div>
     </div>
   </div>
 
   <div class="footer">
-    AstroBTC Reversal Scanner &middot; Data-driven astro research &middot;
+    AstroBTC Сканер разворотов &middot; Астро-исследование на данных &middot;
     <a href="https://github.com/maksimblak/Astro_crypto" target="_blank">GitHub</a>
   </div>
 </div>
 
 <script>
-const MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const MO_RU = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+const MO_RU_FULL = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 
 function fmtDate(d) {
   const dt = new Date(d);
@@ -412,53 +400,54 @@ async function init() {
   const pivots = await pivotsR.json();
   const stats = await statsR.json();
 
-  buildHero(today);
-  buildCalendar(calendarData);
-  buildPrice(daily, pivots);
-  buildRisk(calendarData);
-  buildStats(stats);
+  // Если какие-то API вернули ошибку — обработаем
+  if (Array.isArray(calendarData)) {
+    buildCalendar(calendarData);
+    buildRisk(calendarData);
+  }
+  if (today.date) buildHero(today);
+  if (Array.isArray(daily) && Array.isArray(pivots)) buildPrice(daily, pivots);
+  if (stats.thresholds) buildStats(stats);
 }
 
 function buildHero(t) {
-  if (!t.date) return;
   const sc = t.score || 0;
   const el = document.getElementById('heroScore');
   el.textContent = sc.toFixed(1);
   el.className = 'hero-score ' + scoreClass(sc);
 
-  const dirText = t.direction > 0 ? '&#9650; Peak bias' : t.direction < 0 ? '&#9660; Bottom bias' : '&#9644; Neutral';
+  const dirText = t.direction > 0 ? '&#9650; Склонность к пику' : t.direction < 0 ? '&#9660; Склонность к дну' : '&#9644; Нейтрально';
   document.getElementById('heroSub').innerHTML = `${fmtDate(t.date)} &middot; ${dirText}`;
 
-  const details = (t.details || '').split(' | ').filter(Boolean);
   document.getElementById('heroCards').innerHTML = `
     <div class="hero-card">
-      <div class="hc-label">Direction</div>
+      <div class="hc-label">Направление</div>
       <div class="hc-val ${t.direction > 0 ? 'dir-up' : t.direction < 0 ? 'dir-down' : 'dir-neutral'}">
-        ${t.direction > 0 ? '&#9650; Peak' : t.direction < 0 ? '&#9660; Bottom' : '&#9644; Neutral'}
+        ${t.direction > 0 ? '&#9650; Пик' : t.direction < 0 ? '&#9660; Дно' : '&#9644; Нейтр.'}
       </div>
     </div>
     <div class="hero-card">
-      <div class="hc-label">Moon Sign</div>
+      <div class="hc-label">Знак Луны</div>
       <div class="hc-val">${t.moon_sign || '—'}</div>
       <div class="hc-sub">${t.moon_element || ''}</div>
     </div>
     <div class="hero-card">
-      <div class="hc-label">Phase</div>
+      <div class="hc-label">Фаза</div>
       <div class="hc-val" style="font-size:16px">${t.quarter || '—'}</div>
     </div>
     <div class="hero-card">
-      <div class="hc-label">Tension / Harmony</div>
+      <div class="hc-label">Напряжение / Гармония</div>
       <div class="hc-val" style="font-size:18px">${t.tension || 0} / ${t.harmony || 0}</div>
     </div>
     <div class="hero-card">
-      <div class="hc-label">Eclipse</div>
-      <div class="hc-val" style="font-size:18px">${t.eclipse_days}d</div>
-      <div class="hc-sub">${t.eclipse_days <= 7 ? 'Near eclipse!' : 'No eclipse nearby'}</div>
+      <div class="hc-label">Затмение</div>
+      <div class="hc-val" style="font-size:18px">${t.eclipse_days} дн.</div>
+      <div class="hc-sub">${t.eclipse_days <= 7 ? 'Рядом затмение!' : 'Затмений рядом нет'}</div>
     </div>
     <div class="hero-card">
-      <div class="hc-label">Retro Planets</div>
-      <div class="hc-val" style="font-size:14px">${t.retro_planets || 'None'}</div>
-      ${t.station_planets ? '<div class="hc-sub">Station: '+t.station_planets+'</div>' : ''}
+      <div class="hc-label">Ретро планеты</div>
+      <div class="hc-val" style="font-size:14px">${t.retro_planets || 'Нет'}</div>
+      ${t.station_planets ? '<div class="hc-sub">Станция: '+t.station_planets+'</div>' : ''}
     </div>
   `;
 }
@@ -468,7 +457,7 @@ function buildCalendar(data, filterMonth) {
 
   const months = [...new Set(data.map(d => d.date.substring(0,7)))].sort();
   const box = document.getElementById('monthFilters');
-  box.innerHTML = `<button class="pill ${!filterMonth?'active':''}" onclick="buildCalendar(calendarData)">All</button>`;
+  box.innerHTML = `<button class="pill ${!filterMonth?'active':''}" onclick="buildCalendar(calendarData)">Все</button>`;
   months.forEach(m => {
     const dt = new Date(m + '-01');
     const lbl = MO_RU[dt.getMonth()] + ' ' + dt.getFullYear();
@@ -508,7 +497,7 @@ function buildCalendar(data, filterMonth) {
               const d = filtered[items[0].dataIndex];
               return `${d.quarter} | ${d.moon_sign} (${d.moon_element})`;
             },
-            label: (item) => `Score: ${item.raw.toFixed(1)}`,
+            label: (item) => `Балл: ${item.raw.toFixed(1)}`,
             afterBody: (items) => {
               const d = filtered[items[0].dataIndex];
               if (!d.details) return '';
@@ -558,11 +547,11 @@ function buildPrice(daily, pivots) {
           borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.1, order: 2,
         },
         {
-          label: 'Peaks', type: 'bubble', data: pts(highs),
+          label: 'Пики', type: 'bubble', data: pts(highs),
           backgroundColor: 'rgba(255,59,92,0.6)', borderColor: '#ff3b5c', borderWidth: 1.5, order: 1,
         },
         {
-          label: 'Bottoms', type: 'bubble', data: pts(lows),
+          label: 'Дно', type: 'bubble', data: pts(lows),
           backgroundColor: 'rgba(0,255,136,0.5)', borderColor: '#00ff88', borderWidth: 1.5, order: 1,
         }
       ]
@@ -614,7 +603,7 @@ function buildRisk(calendar) {
   const grid = document.getElementById('riskGrid');
 
   if (!upcoming.length) {
-    grid.innerHTML = '<div class="loading" style="animation:none">No high-score days in range</div>';
+    grid.innerHTML = '<div class="loading" style="animation:none">Нет дней с высоким баллом в диапазоне</div>';
     return;
   }
 
@@ -623,21 +612,21 @@ function buildRisk(calendar) {
     const cls = d.score >= 5 ? 'hot' : d.score >= 3 ? 'warm' : 'mild';
     const daysAway = Math.round((new Date(d.date) - todayDate) / 86400000);
     const details = (d.details || '').split(' | ').filter(s => s.startsWith('+'));
-    const dirHtml = d.direction > 0 ? '<span class="up">&#9650; Peak</span>'
-                  : d.direction < 0 ? '<span class="down">&#9660; Bottom</span>'
-                  : 'Neutral';
+    const dirHtml = d.direction > 0 ? '<span class="up">&#9650; Пик</span>'
+                  : d.direction < 0 ? '<span class="down">&#9660; Дно</span>'
+                  : 'Нейтрально';
 
     return `<div class="risk-item ${cls}">
       <div class="risk-badge ${cls}">${d.score.toFixed(1)}</div>
       <div class="risk-body">
-        <div class="risk-date">${fmtDate(d.date)} <span class="days-away">${daysAway === 0 ? 'Today' : 'in ' + daysAway + 'd'}</span></div>
+        <div class="risk-date">${fmtDate(d.date)} <span class="days-away">${daysAway === 0 ? 'Сегодня' : 'через ' + daysAway + ' дн.'}</span></div>
         <div class="risk-dir">${dirHtml}</div>
         <div class="risk-meta">
           <span class="tag">${d.moon_sign}</span>
           <span class="tag">${d.moon_element}</span>
           <span class="tag">${d.quarter}</span>
-          ${d.retro_planets ? '<span class="tag">Retro: '+d.retro_planets+'</span>' : ''}
-          ${d.station_planets ? '<span class="tag">Station: '+d.station_planets+'</span>' : ''}
+          ${d.retro_planets ? '<span class="tag">Ретро: '+d.retro_planets+'</span>' : ''}
+          ${d.station_planets ? '<span class="tag">Станция: '+d.station_planets+'</span>' : ''}
         </div>
         <div class="risk-details">${details.join('<br>')}</div>
       </div>
@@ -662,24 +651,24 @@ function buildStats(s) {
     <div class="stats-row">
       <div class="stat-block">
         <div class="stat-val">${s.baseline_avg_score}</div>
-        <div class="stat-label">Avg Score (All Days)</div>
+        <div class="stat-label">Ср. балл (все дни)</div>
       </div>
       <div class="stat-block">
         <div class="stat-val accent-green">${s.pivot_avg_score}</div>
-        <div class="stat-label">Avg Score (Pivots)</div>
+        <div class="stat-label">Ср. балл (развороты)</div>
       </div>
       <div class="stat-block">
         <div class="stat-val accent-yellow">${s.total_pivots}</div>
-        <div class="stat-label">Historical Pivots</div>
+        <div class="stat-label">Исторических разворотов</div>
       </div>
       <div class="stat-block">
         <div class="stat-val">${s.direction_accuracy}%</div>
-        <div class="stat-label">Direction Accuracy</div>
+        <div class="stat-label">Точность направления</div>
       </div>
     </div>
-    <div style="font-size:14px;font-weight:600;margin-bottom:8px;color:var(--text2)">Threshold Analysis</div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:8px;color:var(--text2)">Анализ порогов</div>
     <table>
-      <thead><tr><th>Threshold</th><th>Calendar Days</th><th>Pivots Caught</th><th>Lift</th></tr></thead>
+      <thead><tr><th>Порог</th><th>Дней в календаре</th><th>Поймано разворотов</th><th>Lift</th></tr></thead>
       <tbody>${thRows}</tbody>
     </table>
   `;
