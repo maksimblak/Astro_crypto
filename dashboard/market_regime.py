@@ -196,6 +196,53 @@ def _context_profile(context_score):
     }
 
 
+def _clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def _daily_setup_profile(direction_score, stress_score, context_score):
+    # Direction stays dominant, context refines the tilt, stress subtracts quality.
+    direction_component = (direction_score / 16.0) * 60.0
+    context_component = (context_score / 10.0) * 25.0
+    stress_penalty = (stress_score / 8.0) * 25.0
+    setup_score = round(_clamp(direction_component + context_component - stress_penalty, -100, 100))
+
+    if setup_score >= 45:
+        return {
+            "setup_score": setup_score,
+            "setup_label": "Сильный bullish setup",
+            "setup_tone": "bull",
+            "setup_summary": "Индикаторы хорошо согласованы: directional layer, внешний контекст и stress не спорят друг с другом.",
+        }
+    if setup_score >= 20:
+        return {
+            "setup_score": setup_score,
+            "setup_label": "Умеренно bullish setup",
+            "setup_tone": "bull",
+            "setup_summary": "Суммарный дневной сетап положительный, но часть индикаторов всё ещё требует осторожности.",
+        }
+    if setup_score <= -45:
+        return {
+            "setup_score": setup_score,
+            "setup_label": "Сильный bearish setup",
+            "setup_tone": "bear",
+            "setup_summary": "Большинство индикаторов сейчас указывают на слабый дневной фон: direction, context и stress складываются против risk-on.",
+        }
+    if setup_score <= -20:
+        return {
+            "setup_score": setup_score,
+            "setup_label": "Умеренно bearish setup",
+            "setup_tone": "bear",
+            "setup_summary": "Сводный дневной score отрицательный: лонговый сетап слабый, а риск ошибок выше обычного.",
+        }
+    return {
+        "setup_score": setup_score,
+        "setup_label": "Смешанный / нейтральный setup",
+        "setup_tone": "neutral",
+        "setup_summary": "Индикаторы не дают чистого дневного преимущества. Это скорее mixed tape, чем качественный directional setup.",
+    }
+
+
 def _classify_regime(metrics, direction_score, stress_score):
     close_vs_200 = metrics["close_vs_200"]
     drawdown = metrics["drawdown_ath"]
@@ -703,6 +750,7 @@ def calculate_regime_history(rows):
         stress_score = sum(signal["points"] for signal in stress_signals)
         context_signals = _build_context_signals(metrics)
         context_score = sum(signal["score"] for signal in context_signals if signal["available"])
+        setup_profile = _daily_setup_profile(direction_score, stress_score, context_score)
 
         regime = _classify_regime(metrics, direction_score, stress_score)
         confidence = _direction_confidence(direction_signals, direction_score, stress_score, regime["code"])
@@ -725,6 +773,10 @@ def calculate_regime_history(rows):
                 "context_score": context_score,
                 "context_label": context_profile["context_label"],
                 "context_tone": context_profile["context_tone"],
+                "setup_score": setup_profile["setup_score"],
+                "setup_label": setup_profile["setup_label"],
+                "setup_tone": setup_profile["setup_tone"],
+                "setup_summary": setup_profile["setup_summary"],
                 "momentum_20": round(momentum_20 * 100, 2) if momentum_20 is not None else None,
                 "momentum_90": round(momentum_90 * 100, 2) if momentum_90 is not None else None,
                 "drawdown_ath": round(drawdown_ath * 100, 2) if drawdown_ath is not None else None,
@@ -767,6 +819,10 @@ def build_regime_payload(rows):
             "context_score": 0,
             "context_label": "External neutral",
             "context_tone": "neutral",
+            "setup_score": 0,
+            "setup_label": "Недостаточно данных",
+            "setup_tone": "neutral",
+            "setup_summary": "Нет данных, чтобы собрать сводный дневной indicator score.",
             "summary": "В таблице btc_daily нет данных для построения режима.",
             "direction_signals": [],
             "stress_signals": [],
@@ -803,6 +859,10 @@ def build_regime_payload(rows):
         "context_score": latest_point["context_score"],
         "context_label": latest_point["context_label"],
         "context_tone": latest_point["context_tone"],
+        "setup_score": latest_point["setup_score"],
+        "setup_label": latest_point["setup_label"],
+        "setup_tone": latest_point["setup_tone"],
+        "setup_summary": latest_point["setup_summary"],
         "summary": summary,
         "direction_signals": direction_signals,
         "stress_signals": stress_signals,

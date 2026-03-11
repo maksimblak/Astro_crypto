@@ -238,6 +238,35 @@
   .lift-meh { color: var(--text2); }
 
   .regime-overview { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .setup-banner {
+    display: flex; gap: 18px; align-items: center; flex-wrap: wrap;
+    background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+    border: 1px solid var(--border-glow);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    margin-bottom: 18px;
+  }
+  .setup-score {
+    min-width: 112px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 42px; font-weight: 800; line-height: 1;
+    letter-spacing: -1px;
+  }
+  .setup-score.bull { color: var(--bull); }
+  .setup-score.bear { color: var(--bear); }
+  .setup-score.neutral { color: var(--neon-cyan); }
+  .setup-copy { flex: 1; min-width: 260px; }
+  .setup-kicker {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--text2); font-weight: 700;
+  }
+  .setup-label {
+    font-size: 22px; font-weight: 800; line-height: 1.1; margin-top: 4px;
+  }
+  .setup-text {
+    margin-top: 8px; font-size: 13px; color: var(--text2); line-height: 1.5;
+    max-width: 64ch;
+  }
   .regime-main {
     flex: 0 0 320px;
     background: linear-gradient(135deg, rgba(59,130,246,0.10), rgba(0,212,255,0.06));
@@ -572,6 +601,11 @@ function buildHero(t) {
       <div class="hc-sub">${t.moon_element || ''}</div>
     </div>
     <div class="hero-card">
+      <div class="hc-label">Знак Солнца</div>
+      <div class="hc-val">${t.sun_sign || '—'}</div>
+      <div class="hc-sub">${t.sun_element || ''}</div>
+    </div>
+    <div class="hero-card">
       <div class="hc-label">Фаза</div>
       <div class="hc-val" style="font-size:16px">${t.quarter || '—'}</div>
     </div>
@@ -635,7 +669,7 @@ function buildCalendar(data, filterMonth) {
             title: (items) => fmtDate(filtered[items[0].dataIndex].date),
             afterTitle: (items) => {
               const d = filtered[items[0].dataIndex];
-              return `${d.quarter} | ${d.moon_sign} (${d.moon_element})`;
+              return `${d.quarter} | ☽ ${d.moon_sign} (${d.moon_element}) | ☉ ${d.sun_sign || '—'}`;
             },
             label: (item) => `Балл: ${item.raw.toFixed(1)}`,
             afterBody: (items) => {
@@ -741,6 +775,7 @@ function buildRegime(r) {
   const tone = regimeTone(r.regime_code);
   const stressChipTone = stressTone(r.stress_tone);
   const contextChipTone = stressTone(r.context_tone);
+  const setupTone = stressTone(r.setup_tone);
   const biasLabel = r.bias === 'risk-on' ? 'Risk-on'
                   : r.bias === 'risk-off' ? 'Risk-off'
                   : 'Нейтрально';
@@ -789,6 +824,14 @@ function buildRegime(r) {
   `).join('');
 
   block.innerHTML = `
+    <div class="setup-banner">
+      <div class="setup-score ${setupTone}">${r.setup_score > 0 ? '+' : ''}${r.setup_score}</div>
+      <div class="setup-copy">
+        <div class="setup-kicker">Сводный индикаторный score на день</div>
+        <div class="setup-label">${r.setup_label}</div>
+        <div class="setup-text">${r.setup_summary} Это не прогноз цены в процентах, а быстрая сводка того, насколько хорошо текущие индикаторы складываются в дневной setup.</div>
+      </div>
+    </div>
     <div class="regime-overview">
       <div class="regime-main">
         <div class="regime-kicker">Режим на ${fmtDate(r.as_of)}</div>
@@ -964,8 +1007,9 @@ function buildRisk(calendar, referenceDate) {
         <div class="risk-date">${fmtDate(d.date)} <span class="days-away">${daysAway === 0 ? 'Сегодня' : 'через ' + daysAway + ' дн.'}</span></div>
         <div class="risk-dir">${dirHtml}</div>
         <div class="risk-meta">
-          <span class="tag">${d.moon_sign}</span>
+          <span class="tag">☽ ${d.moon_sign}</span>
           <span class="tag">${d.moon_element}</span>
+          <span class="tag">☉ ${d.sun_sign || ''}</span>
           <span class="tag">${d.quarter}</span>
           ${d.retro_planets ? '<span class="tag">Ретро: '+d.retro_planets+'</span>' : ''}
           ${d.station_planets ? '<span class="tag">Станция: '+d.station_planets+'</span>' : ''}

@@ -118,7 +118,8 @@ def api_calendar():
         rows = conn.execute(
             "SELECT date, score, direction, moon_sign, moon_element, quarter, "
             "eclipse_days, moon_ingress, tension, harmony, retro_planets, "
-            "station_planets, details FROM btc_astro_calendar ORDER BY date"
+            "station_planets, sun_sign, sun_element, details "
+            "FROM btc_astro_calendar ORDER BY date"
         ).fetchall()
     except sqlite3.OperationalError:
         conn.close()
@@ -185,7 +186,8 @@ def api_today():
         fields = (
             "SELECT date, score, direction, moon_sign, moon_element, quarter, "
             "eclipse_days, moon_ingress, tension, harmony, retro_planets, "
-            "station_planets, details FROM btc_astro_calendar "
+            "station_planets, sun_sign, sun_element, details "
+            "FROM btc_astro_calendar "
         )
         target_date = date.today().isoformat()
         row = conn.execute(fields + "WHERE date = ?", (target_date,)).fetchone()
