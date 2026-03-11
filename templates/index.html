@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BTC Astro Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --bg2: #16213e;
+    --card: #1e2a47;
+    --border: #2a3a5c;
+    --text: #e0e0e0;
+    --text2: #8892a4;
+    --accent: #e2b714;
+    --red: #ff4757;
+    --orange: #ffa502;
+    --yellow: #eccc68;
+    --green: #2ed573;
+    --blue: #70a1ff;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+  /* Header */
+  .header {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 20px 0;
+    margin-bottom: 24px;
+  }
+  .header-inner {
+    max-width: 1400px; margin: 0 auto; padding: 0 20px;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;
+  }
+  .header h1 { font-size: 24px; color: var(--accent); }
+  .header-info { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
+  .header-badge {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 16px; font-size: 14px;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .header-badge .label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; }
+  .header-badge .value { font-size: 18px; font-weight: 700; }
+  .score-high { color: var(--red); }
+  .score-med { color: var(--orange); }
+  .score-low { color: var(--yellow); }
+  .score-none { color: var(--text2); }
+
+  /* Cards */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+  .card h2 {
+    font-size: 18px; margin-bottom: 16px; color: var(--accent);
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* Filters */
+  .filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filters button {
+    background: var(--bg2); color: var(--text2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 13px;
+    transition: all 0.2s;
+  }
+  .filters button:hover, .filters button.active {
+    background: var(--accent); color: var(--bg); border-color: var(--accent);
+  }
+
+  /* Chart containers */
+  .chart-wrap { position: relative; height: 350px; }
+  .chart-wrap-lg { height: 450px; }
+
+  /* Risk zones */
+  .risk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .risk-card {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; display: flex; gap: 12px; align-items: flex-start;
+    transition: transform 0.15s;
+  }
+  .risk-card:hover { transform: translateY(-2px); }
+  .risk-score {
+    width: 48px; height: 48px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 18px; flex-shrink: 0;
+  }
+  .risk-score.high { background: rgba(255,71,87,0.2); color: var(--red); border: 2px solid var(--red); }
+  .risk-score.med { background: rgba(255,165,2,0.2); color: var(--orange); border: 2px solid var(--orange); }
+  .risk-score.low { background: rgba(236,204,104,0.2); color: var(--yellow); border: 2px solid var(--yellow); }
+  .risk-body { flex: 1; min-width: 0; }
+  .risk-date { font-weight: 600; font-size: 15px; }
+  .risk-dir { font-size: 13px; }
+  .risk-dir .up { color: var(--red); }
+  .risk-dir .down { color: var(--green); }
+  .risk-details { font-size: 12px; color: var(--text2); margin-top: 4px; word-break: break-word; }
+  .risk-meta { font-size: 12px; color: var(--text2); margin-top: 2px; }
+
+  /* Stats table */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
+  .stat-card {
+    background: var(--bg2); border-radius: 8px; padding: 16px; text-align: center;
+    border: 1px solid var(--border);
+  }
+  .stat-card .stat-val { font-size: 28px; font-weight: 700; color: var(--accent); }
+  .stat-card .stat-label { font-size: 12px; color: var(--text2); margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; color: var(--text2); font-weight: 600; padding: 10px 12px; border-bottom: 2px solid var(--border); }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: rgba(255,255,255,0.03); }
+
+  /* Loading */
+  .loading { text-align: center; padding: 60px; color: var(--text2); font-size: 16px; }
+
+  @media (max-width: 768px) {
+    .header-inner { flex-direction: column; align-items: flex-start; }
+    .chart-wrap, .chart-wrap-lg { height: 280px; }
+    .risk-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <h1>BTC Astro Dashboard</h1>
+    <div class="header-info" id="headerInfo">
+      <div class="header-badge"><span class="label">Loading...</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <!-- Calendar -->
+  <div class="card">
+    <h2>Astro-Calendar (Score)</h2>
+    <div class="filters" id="monthFilters"></div>
+    <div class="chart-wrap chart-wrap-lg">
+      <canvas id="calendarChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Price + pivots -->
+  <div class="card">
+    <h2>BTC Price + Historical Pivots</h2>
+    <div class="chart-wrap chart-wrap-lg">
+      <canvas id="priceChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Risk zones -->
+  <div class="card">
+    <h2>Upcoming Risk Zones (score >= 3)</h2>
+    <div class="risk-grid" id="riskGrid">
+      <div class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="card">
+    <h2>Model Statistics</h2>
+    <div id="statsBlock"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<script>
+const MONTHS_RU = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+
+function scoreColor(s) {
+  if (s >= 5) return 'rgba(255,71,87,0.85)';
+  if (s >= 3) return 'rgba(255,165,2,0.85)';
+  if (s >= 2) return 'rgba(236,204,104,0.85)';
+  return 'rgba(136,146,164,0.5)';
+}
+function scoreBorder(s) {
+  if (s >= 5) return '#ff4757';
+  if (s >= 3) return '#ffa502';
+  if (s >= 2) return '#eccc68';
+  return '#8892a4';
+}
+function scoreClass(s) {
+  if (s >= 5) return 'score-high';
+  if (s >= 3) return 'score-med';
+  if (s >= 2) return 'score-low';
+  return 'score-none';
+}
+function riskClass(s) {
+  if (s >= 5) return 'high';
+  if (s >= 3) return 'med';
+  return 'low';
+}
+function dirArrow(d) {
+  if (d > 0) return '<span class="up">&#9650; Peak</span>';
+  if (d < 0) return '<span class="down">&#9660; Bottom</span>';
+  return '<span>&#9644; Neutral</span>';
+}
+function fmtDate(d) {
+  const dt = new Date(d);
+  return dt.getDate() + ' ' + MONTHS_RU[dt.getMonth()] + ' ' + dt.getFullYear();
+}
+
+let calendarData = [];
+let calChart = null;
+let allMonths = [];
+
+async function loadAll() {
+  const [todayR, calR, dailyR, pivotsR, statsR] = await Promise.all([
+    fetch('/api/today'), fetch('/api/calendar'), fetch('/api/daily'),
+    fetch('/api/pivots'), fetch('/api/stats')
+  ]);
+  const today = await todayR.json();
+  const calendar = await calR.json();
+  const daily = await dailyR.json();
+  const pivots = await pivotsR.json();
+  const stats = await statsR.json();
+
+  renderHeader(today);
+  calendarData = calendar;
+  renderCalendar(calendar);
+  renderPrice(daily, pivots);
+  renderRiskZones(calendar);
+  renderStats(stats);
+}
+
+function renderHeader(t) {
+  if (!t.date) { document.getElementById('headerInfo').innerHTML = '<span>No data</span>'; return; }
+  const sc = t.score || 0;
+  const dirText = t.direction > 0 ? '&#9650; Peak zone' : t.direction < 0 ? '&#9660; Bottom zone' : '&#9644; Neutral';
+  const dirColor = t.direction > 0 ? 'var(--red)' : t.direction < 0 ? 'var(--green)' : 'var(--text2)';
+  document.getElementById('headerInfo').innerHTML = `
+    <div class="header-badge"><span class="label">Date</span><span class="value">${fmtDate(t.date)}</span></div>
+    <div class="header-badge"><span class="label">Score</span><span class="value ${scoreClass(sc)}">${sc.toFixed(1)}</span></div>
+    <div class="header-badge"><span class="label">Direction</span><span class="value" style="color:${dirColor};font-size:14px">${dirText}</span></div>
+    <div class="header-badge"><span class="label">Moon</span><span class="value" style="font-size:14px">${t.moon_sign || '?'}</span></div>
+    <div class="header-badge"><span class="label">Phase</span><span class="value" style="font-size:14px">${t.quarter || '?'}</span></div>
+    <div class="header-badge"><span class="label">Element</span><span class="value" style="font-size:14px">${t.moon_element || '?'}</span></div>
+  `;
+}
+
+function renderCalendar(data, filterMonth) {
+  let filtered = data;
+  if (filterMonth) {
+    filtered = data.filter(d => d.date.substring(0,7) === filterMonth);
+  }
+
+  // month buttons
+  const months = [...new Set(data.map(d => d.date.substring(0,7)))].sort();
+  allMonths = months;
+  const filtersEl = document.getElementById('monthFilters');
+  filtersEl.innerHTML = '<button class="' + (!filterMonth ? 'active' : '') + '" onclick="renderCalendar(calendarData)">All</button>';
+  months.forEach(m => {
+    const dt = new Date(m + '-01');
+    const label = MONTHS_RU[dt.getMonth()] + ' ' + dt.getFullYear();
+    const cls = filterMonth === m ? 'active' : '';
+    filtersEl.innerHTML += `<button class="${cls}" onclick="renderCalendar(calendarData,'${m}')">${label}</button>`;
+  });
+
+  const labels = filtered.map(d => {
+    const dt = new Date(d.date);
+    return dt.getDate() + ' ' + MONTHS_RU[dt.getMonth()];
+  });
+  const scores = filtered.map(d => d.score);
+  const bgColors = scores.map(s => scoreColor(s));
+  const bdColors = scores.map(s => scoreBorder(s));
+
+  if (calChart) calChart.destroy();
+
+  const ctx = document.getElementById('calendarChart').getContext('2d');
+  calChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Astro Score',
+        data: scores,
+        backgroundColor: bgColors,
+        borderColor: bdColors,
+        borderWidth: 1,
+        borderRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => {
+              const i = items[0].dataIndex;
+              return fmtDate(filtered[i].date);
+            },
+            afterTitle: (items) => {
+              const i = items[0].dataIndex;
+              const d = filtered[i];
+              return `Moon: ${d.moon_sign} (${d.moon_element})\nPhase: ${d.quarter}`;
+            },
+            label: (item) => `Score: ${item.raw}`,
+            afterBody: (items) => {
+              const i = items[0].dataIndex;
+              const d = filtered[i];
+              if (!d.details) return '';
+              return '\n' + d.details.split(' | ').join('\n');
+            }
+          },
+          titleFont: { size: 13 },
+          bodyFont: { size: 12 },
+          maxWidth: 400,
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8892a4', maxRotation: 90, font: { size: filtered.length > 60 ? 8 : 11 } },
+          grid: { color: 'rgba(255,255,255,0.05)' }
+        },
+        y: {
+          ticks: { color: '#8892a4' },
+          grid: { color: 'rgba(255,255,255,0.08)' },
+          beginAtZero: true,
+        }
+      }
+    }
+  });
+}
+
+function renderPrice(daily, pivots) {
+  const labels = daily.map(d => d.date);
+  const prices = daily.map(d => d.close);
+
+  // Build pivot datasets
+  const highs = pivots.filter(p => p.is_high === 1);
+  const lows = pivots.filter(p => p.is_high === 0);
+
+  function pivotPoints(arr, color) {
+    return arr.map(p => ({
+      x: p.date,
+      y: p.price,
+      r: Math.max(4, Math.min(14, (p.tension_count || 0) + (p.retro_count || 0) + (p.eclipse_days || 0))),
+    }));
+  }
+
+  const ctx = document.getElementById('priceChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'BTC Close',
+          data: prices,
+          borderColor: '#70a1ff',
+          backgroundColor: 'rgba(112,161,255,0.1)',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: true,
+          tension: 0.1,
+          order: 2,
+        },
+        {
+          label: 'Highs (Peaks)',
+          type: 'bubble',
+          data: pivotPoints(highs),
+          backgroundColor: 'rgba(255,71,87,0.7)',
+          borderColor: '#ff4757',
+          borderWidth: 1,
+          order: 1,
+        },
+        {
+          label: 'Lows (Bottoms)',
+          type: 'bubble',
+          data: pivotPoints(lows),
+          backgroundColor: 'rgba(46,213,115,0.7)',
+          borderColor: '#2ed573',
+          borderWidth: 1,
+          order: 1,
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#e0e0e0', font: { size: 12 } } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              if (ctx.dataset.type === 'bubble') {
+                const p = ctx.raw;
+                return `${ctx.dataset.label}: $${p.y.toLocaleString()} (${p.x})`;
+              }
+              return `BTC: $${ctx.parsed.y.toLocaleString()}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'category',
+          ticks: {
+            color: '#8892a4',
+            maxTicksLimit: 24,
+            callback: function(val, i) {
+              const d = this.getLabelForValue(val);
+              if (!d) return '';
+              return d.substring(0, 7);
+            }
+          },
+          grid: { color: 'rgba(255,255,255,0.05)' }
+        },
+        y: {
+          ticks: {
+            color: '#8892a4',
+            callback: v => '$' + (v >= 1000 ? (v/1000).toFixed(0) + 'k' : v)
+          },
+          grid: { color: 'rgba(255,255,255,0.08)' },
+          type: 'logarithmic',
+        }
+      }
+    }
+  });
+}
+
+function renderRiskZones(calendar) {
+  const today = new Date().toISOString().substring(0, 10);
+  const upcoming = calendar.filter(d => d.date >= today && d.score >= 3).slice(0, 20);
+  const grid = document.getElementById('riskGrid');
+
+  if (!upcoming.length) {
+    grid.innerHTML = '<div class="loading">No high-score days found in calendar range.</div>';
+    return;
+  }
+
+  grid.innerHTML = upcoming.map(d => `
+    <div class="risk-card">
+      <div class="risk-score ${riskClass(d.score)}">${d.score.toFixed(1)}</div>
+      <div class="risk-body">
+        <div class="risk-date">${fmtDate(d.date)}</div>
+        <div class="risk-dir">${dirArrow(d.direction)}</div>
+        <div class="risk-meta">${d.moon_sign} (${d.moon_element}) &middot; ${d.quarter}${d.retro_planets ? ' &middot; Retro: ' + d.retro_planets : ''}</div>
+        <div class="risk-details">${(d.details || '').split(' | ').join('<br>')}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderStats(s) {
+  const block = document.getElementById('statsBlock');
+  let thRows = s.thresholds.map(t => `
+    <tr>
+      <td>&ge; ${t.threshold}</td>
+      <td>${t.days_count} (${t.days_pct}%)</td>
+      <td>${t.pivots_in_zone}</td>
+      <td style="font-weight:700;color:${t.lift >= 1.5 ? 'var(--green)' : t.lift >= 1.0 ? 'var(--yellow)' : 'var(--text2)'}">${t.lift}x</td>
+    </tr>
+  `).join('');
+
+  block.innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-val">${s.baseline_avg_score}</div>
+        <div class="stat-label">Avg Score (All Days)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">${s.pivot_avg_score}</div>
+        <div class="stat-label">Avg Score (Pivot Days)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">${s.total_pivots}</div>
+        <div class="stat-label">Total Pivots</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val">${s.direction_accuracy}%</div>
+        <div class="stat-label">Direction Accuracy (${s.direction_correct}/${s.direction_total})</div>
+      </div>
+    </div>
+    <h3 style="margin-bottom:8px;font-size:15px;color:var(--text2)">Threshold Analysis</h3>
+    <table>
+      <thead><tr><th>Threshold</th><th>Days in Calendar</th><th>Pivots in Zone</th><th>Lift</th></tr></thead>
+      <tbody>${thRows}</tbody>
+    </table>
+  `;
+}
+
+loadAll();
+</script>
+</body>
+</html>
