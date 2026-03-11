@@ -456,25 +456,44 @@ function localDateKey(dt = new Date()) {
 function scrollTo(sel) {
   document.querySelector(sel)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+let scoreThresholds = { cool: 0.5, warm: 1.0, hot: 1.5, extreme: 2.0 };
+let dashboardToday = null;
+
+function setScoreThresholds(stats) {
+  if (!stats?.score_scale) return;
+  scoreThresholds = {
+    cool: Number(stats.score_scale.cool) || scoreThresholds.cool,
+    warm: Number(stats.score_scale.warm) || scoreThresholds.warm,
+    hot: Number(stats.score_scale.hot) || scoreThresholds.hot,
+    extreme: Number(stats.score_scale.extreme) || scoreThresholds.extreme,
+  };
+}
+
 function scoreClass(s) {
-  if (s >= 5) return 'hot';
-  if (s >= 3) return 'warm';
-  if (s >= 2) return 'cool';
+  if (s >= scoreThresholds.hot) return 'hot';
+  if (s >= scoreThresholds.warm) return 'warm';
+  if (s >= scoreThresholds.cool) return 'cool';
   return 'cold';
 }
 function scoreBarColor(s) {
-  if (s >= 6) return 'rgba(255,59,92,0.9)';
-  if (s >= 4) return 'rgba(255,107,53,0.85)';
-  if (s >= 3) return 'rgba(245,158,11,0.8)';
-  if (s >= 2) return 'rgba(0,212,255,0.6)';
+  if (s >= scoreThresholds.extreme) return 'rgba(255,59,92,0.92)';
+  if (s >= scoreThresholds.hot) return 'rgba(255,107,53,0.88)';
+  if (s >= scoreThresholds.warm) return 'rgba(245,158,11,0.82)';
+  if (s >= scoreThresholds.cool) return 'rgba(0,212,255,0.62)';
   return 'rgba(75,85,99,0.4)';
 }
 function scoreBarBorder(s) {
-  if (s >= 6) return '#ff3b5c';
-  if (s >= 4) return '#ff6b35';
-  if (s >= 3) return '#f59e0b';
-  if (s >= 2) return '#00d4ff';
+  if (s >= scoreThresholds.extreme) return '#ff3b5c';
+  if (s >= scoreThresholds.hot) return '#ff6b35';
+  if (s >= scoreThresholds.warm) return '#f59e0b';
+  if (s >= scoreThresholds.cool) return '#00d4ff';
   return '#4b5563';
+}
+
+function riskClass(s) {
+  if (s >= scoreThresholds.hot) return 'hot';
+  if (s >= scoreThresholds.warm) return 'warm';
+  return 'mild';
 }
 
 let calendarData = [], calChart = null, regimeChart = null;
@@ -505,11 +524,13 @@ async function init() {
   const pivots = await pivotsR.json();
   const stats = await statsR.json();
   const regime = await regimeR.json();
+  setScoreThresholds(stats);
+  dashboardToday = today.date || localDateKey();
 
   // Если какие-то API вернули ошибку — обработаем
   if (Array.isArray(calendarData)) {
     buildCalendar(calendarData);
-    buildRisk(calendarData);
+    buildRisk(calendarData, dashboardToday);
   }
   if (today.date) buildHero(today);
   if (Array.isArray(daily) && Array.isArray(pivots)) buildPrice(daily, pivots);
@@ -848,19 +869,24 @@ function buildRegime(r) {
   });
 }
 
-function buildRisk(calendar) {
-  const today = localDateKey();
-  const upcoming = calendar.filter(d => d.date >= today && d.score >= 3).slice(0, 24);
+function buildRisk(calendar, referenceDate) {
+  const today = referenceDate || dashboardToday || localDateKey();
+  let threshold = scoreThresholds.hot;
+  let upcoming = calendar.filter(d => d.date >= today && d.score >= threshold).slice(0, 24);
+  if (!upcoming.length) {
+    threshold = scoreThresholds.warm;
+    upcoming = calendar.filter(d => d.date >= today && d.score >= threshold).slice(0, 24);
+  }
   const grid = document.getElementById('riskGrid');
 
   if (!upcoming.length) {
-    grid.innerHTML = '<div class="loading" style="animation:none">Нет дней с высоким баллом в диапазоне</div>';
+    grid.innerHTML = '<div class="loading" style="animation:none">Нет ближайших дней с повышенным reversal score</div>';
     return;
   }
 
   const todayDate = parseDateOnly(today);
   grid.innerHTML = upcoming.map(d => {
-    const cls = d.score >= 5 ? 'hot' : d.score >= 3 ? 'warm' : 'mild';
+    const cls = riskClass(d.score);
     const daysAway = Math.round((parseDateOnly(d.date) - todayDate) / 86400000);
     const details = (d.details || '').split(' | ').filter(s => s.startsWith('+'));
     const dirHtml = d.direction > 0 ? '<span class="up">&#9650; Пик</span>'
@@ -894,7 +920,7 @@ function buildStats(s) {
   const thRows = s.thresholds.map(t => {
     const cls = t.lift >= 2 ? 'lift-good' : t.lift >= 1.2 ? 'lift-ok' : 'lift-meh';
     return `<tr>
-      <td style="font-family:'JetBrains Mono'">&ge; ${t.threshold}</td>
+      <td style="font-family:'JetBrains Mono'">&ge; ${Number(t.threshold).toFixed(1)}</td>
       <td>${t.days_count} <span style="color:var(--text2)">(${t.days_pct}%)</span></td>
       <td>${t.pivots_in_zone}</td>
       <td class="${cls}">${t.lift}x</td>
