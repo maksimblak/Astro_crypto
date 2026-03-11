@@ -26,12 +26,73 @@ def get_db():
     return conn
 
 
-def derive_thresholds(reference_scores):
-    scores = np.asarray(reference_scores, dtype=float)
-    if len(scores) == 0:
+def market_feature_select_sql(conn):
+    desired_columns = [
+        "amihud_illiquidity_20d",
+        "amihud_z_90d",
+        "range_compression_20d",
+        "wiki_views",
+        "wiki_views_7d",
+        "wiki_views_z_30d",
+        "fear_greed_value",
+        "fear_greed_z_30d",
+        "funding_rate_daily",
+        "funding_rate_z_30d",
+        "perp_premium_daily",
+        "perp_premium_z_30d",
+        "open_interest_value",
+        "open_interest_z_30d",
+        "unique_addresses",
+        "unique_addresses_z_30d",
+        "tx_count",
+        "tx_count_z_30d",
+        "onchain_activity_z_30d",
+    ]
+    try:
+        existing_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(btc_market_features)").fetchall()
+        }
+    except sqlite3.OperationalError:
+        return ""
+
+    select_parts = []
+    for column in desired_columns:
+        if column in existing_columns:
+            select_parts.append(f"f.{column}")
+        else:
+            select_parts.append(f"NULL AS {column}")
+    return ", " + ", ".join(select_parts) if select_parts else ""
+
+
+def derive_thresholds(reference_scores, pivot_scores=None):
+    """Precision-based пороги если pivot_scores доступны, иначе fallback на квантили."""
+    base = np.asarray(reference_scores, dtype=float)
+    if len(base) == 0:
         return [0.5, 1.0, 1.5, 2.0]
 
-    raw = sorted({round(float(np.quantile(scores, q)), 1) for q in [0.75, 0.85, 0.90, 0.95]})
+    if pivot_scores is not None:
+        pivots = np.asarray(pivot_scores, dtype=float)
+        if len(pivots) > 0:
+            all_scores = np.concatenate([base, pivots])
+            unique = sorted(t for t in set(round(float(s), 1) for s in all_scores) if t > 0)
+            thresholds = []
+            for target_pct in (3.0, 5.0, 8.0, 12.0):
+                for t in unique:
+                    p_above = int((pivots >= t).sum())
+                    b_above = int((base >= t).sum())
+                    if p_above + b_above == 0:
+                        continue
+                    if p_above / (p_above + b_above) * 100 >= target_pct:
+                        thresholds.append(t)
+                        break
+            thresholds = sorted(set(thresholds))
+            if thresholds:
+                while len(thresholds) < 4:
+                    thresholds.append(round(thresholds[-1] + 0.5, 1))
+                return thresholds[:4]
+
+    raw = sorted({round(float(np.quantile(base, q)), 1) for q in [0.75, 0.85, 0.90, 0.95]})
     thresholds = [value for value in raw if value > 0]
     if not thresholds:
         return [0.5, 1.0, 1.5, 2.0]
@@ -94,12 +155,22 @@ def api_daily():
 def api_regime():
     conn = get_db()
     try:
+        feature_select = market_feature_select_sql(conn)
         rows = conn.execute(
-            "SELECT date, open, high, low, close, volume FROM btc_daily ORDER BY date"
+            "SELECT d.date, d.open, d.high, d.low, d.close, d.volume "
+            + feature_select + " "
+            "FROM btc_daily d "
+            "LEFT JOIN btc_market_features f ON f.date = d.date "
+            "ORDER BY d.date"
         ).fetchall()
     except sqlite3.OperationalError:
-        conn.close()
-        return jsonify({"error": "Table btc_daily not found. Run research/main.py first."}), 404
+        try:
+            rows = conn.execute(
+                "SELECT date, open, high, low, close, volume FROM btc_daily ORDER BY date"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            conn.close()
+            return jsonify({"error": "Table btc_daily not found. Run research/main.py first."}), 404
 
     conn.close()
     if not rows:
@@ -151,7 +222,15 @@ def api_stats():
             "WHERE sample_split = 'test' AND is_pivot = 0"
         ).fetchall()
     ]
-    score_thresholds = derive_thresholds(base_scores)
+    pivot_scores = [
+        row["score"]
+        for row in conn.execute(
+            "SELECT h.score FROM btc_pivots p "
+            "JOIN btc_astro_history h ON h.date = p.date "
+            "WHERE h.sample_split = 'test'"
+        ).fetchall()
+    ]
+    score_thresholds = derive_thresholds(base_scores, pivot_scores)
 
     baseline = conn.execute(
         "SELECT AVG(score) as avg_score FROM btc_astro_history "

@@ -284,6 +284,10 @@
     display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 12px; margin: 18px 0;
   }
+  .signal-section-title {
+    font-size: 12px; color: var(--text2); margin: 4px 0 10px;
+    text-transform: uppercase; letter-spacing: 0.8px;
+  }
   .signal-card {
     background: var(--bg-card2);
     border: 1px solid var(--border);
@@ -736,6 +740,7 @@ function buildPrice(daily, pivots) {
 function buildRegime(r) {
   const tone = regimeTone(r.regime_code);
   const stressChipTone = stressTone(r.stress_tone);
+  const contextChipTone = stressTone(r.context_tone);
   const biasLabel = r.bias === 'risk-on' ? 'Risk-on'
                   : r.bias === 'risk-off' ? 'Risk-off'
                   : 'Нейтрально';
@@ -747,9 +752,18 @@ function buildRegime(r) {
     { label: 'Confidence', value: `${r.confidence}%`, sub: 'Сколько условий режима сейчас совпало' },
     { label: 'Direction score', value: `${r.direction_score > 0 ? '+' : ''}${r.direction_score}`, sub: 'Чистый directional score без stress-компоненты' },
     { label: 'Stress score', value: `${r.stress_score}`, sub: 'Отдельный слой турбулентности рынка' },
+    { label: 'Context score', value: `${r.context_score > 0 ? '+' : ''}${r.context_score}`, sub: 'Attention, derivatives и on-chain как отдельный overlay' },
     { label: 'Momentum 90д', value: `${r.metrics?.momentum_90 ?? '—'}%`, sub: 'Среднесрочный импульс' },
     { label: 'Цена vs 200DMA', value: `${r.metrics?.close_vs_200 ?? '—'}%`, sub: 'Главный structural filter режима' },
+    { label: 'Amihud z', value: `${r.metrics?.amihud_z_90d ?? '—'}`, sub: 'Liquidity stress vs trailing 90д baseline' },
+    { label: 'Range state', value: `${r.metrics?.range_compression_20d ?? '—'}x`, sub: 'Текущий диапазон vs median 20д' },
     { label: 'Просадка от ATH', value: `${r.metrics?.drawdown_ath ?? '—'}%`, sub: 'Насколько далеко рынок от пика' },
+    { label: 'Wikipedia z', value: `${r.metrics?.wiki_views_z_30d ?? '—'}`, sub: 'Внешнее внимание к BTC vs 30д baseline' },
+    { label: 'Fear & Greed', value: `${r.metrics?.fear_greed_value ?? '—'}`, sub: 'Сантимент толпы по шкале 0-100' },
+    { label: 'Funding z', value: `${r.metrics?.funding_rate_z_30d ?? '—'}`, sub: 'Crowding по perpetual funding' },
+    { label: 'Perp premium', value: `${r.metrics?.perp_premium_daily ?? '—'}%`, sub: 'Премия perpetual к spot/index' },
+    { label: 'OI z', value: `${r.metrics?.open_interest_z_30d ?? '—'}`, sub: 'Насколько раздут открытый интерес' },
+    { label: 'On-chain z', value: `${r.metrics?.onchain_activity_z_30d ?? '—'}`, sub: 'Composite из addresses и tx count' },
   ];
 
   const directionSignalsHtml = (r.direction_signals || []).map(s => `
@@ -766,6 +780,13 @@ function buildRegime(r) {
       <div class="signal-note">${s.note}</div>
     </div>
   `).join('');
+  const contextSignalsHtml = (r.context_signals || []).map(s => `
+    <div class="signal-card ${s.tone}">
+      <div class="signal-label">${s.label}</div>
+      <div class="signal-value ${s.tone}">${s.value}</div>
+      <div class="signal-note">${s.note}</div>
+    </div>
+  `).join('');
 
   block.innerHTML = `
     <div class="regime-overview">
@@ -776,6 +797,7 @@ function buildRegime(r) {
         <div class="regime-chips">
           <span class="regime-chip ${tone}">${biasLabel}</span>
           <span class="regime-chip ${stressChipTone}">${r.stress_label}</span>
+          <span class="regime-chip ${contextChipTone}">${r.context_label}</span>
           <span class="regime-chip ${tone}">${r.confidence}% confidence</span>
         </div>
       </div>
@@ -789,10 +811,12 @@ function buildRegime(r) {
         `).join('')}
       </div>
     </div>
-    <div style="font-size:12px;color:var(--text2);margin:4px 0 10px;text-transform:uppercase;letter-spacing:0.8px">Direction signals</div>
+    <div class="signal-section-title">Direction signals</div>
     <div class="signal-grid">${directionSignalsHtml}</div>
-    <div style="font-size:12px;color:var(--text2);margin:4px 0 10px;text-transform:uppercase;letter-spacing:0.8px">Stress signals</div>
+    <div class="signal-section-title">Stress signals</div>
     <div class="signal-grid">${stressSignalsHtml}</div>
+    <div class="signal-section-title">External context</div>
+    <div class="signal-grid">${contextSignalsHtml}</div>
     <div class="chart-box chart-box-lg"><canvas id="regimeChart"></canvas></div>
   `;
 
@@ -828,6 +852,17 @@ function buildRegime(r) {
           tension: 0.15,
         },
         {
+          label: 'Context score',
+          data: history.map(h => h.context_score),
+          yAxisID: 'y',
+          borderColor: 'rgba(168,85,247,0.9)',
+          backgroundColor: 'rgba(168,85,247,0.08)',
+          borderDash: [2, 6],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.15,
+        },
+        {
           label: 'BTC',
           data: history.map(h => h.close),
           yAxisID: 'y1',
@@ -858,7 +893,8 @@ function buildRegime(r) {
                 `Режим: ${h.regime_label}`,
                 `Direction: ${h.direction_score ?? h.regime_score}`,
                 `Confidence: ${h.confidence}%`,
-                `Stress: ${h.stress_score} (${h.stress_label})`
+                `Stress: ${h.stress_score} (${h.stress_label})`,
+                `Context: ${h.context_score} (${h.context_label})`
               ];
             }
           }
