@@ -500,7 +500,11 @@ let calendarData = [], calChart = null, regimeChart = null;
 
 function regimeTone(code) {
   if (code === 'bull' || code === 'recovery') return 'bull';
-  if (code === 'bear' || code === 'panic' || code === 'distribution') return 'bear';
+  if (code === 'bear' || code === 'distribution') return 'bear';
+  return 'neutral';
+}
+function stressTone(tone) {
+  if (tone === 'bull' || tone === 'bear' || tone === 'neutral') return tone;
   return 'neutral';
 }
 function fmtUsd(v) {
@@ -731,6 +735,7 @@ function buildPrice(daily, pivots) {
 
 function buildRegime(r) {
   const tone = regimeTone(r.regime_code);
+  const stressChipTone = stressTone(r.stress_tone);
   const biasLabel = r.bias === 'risk-on' ? 'Risk-on'
                   : r.bias === 'risk-off' ? 'Risk-off'
                   : 'Нейтрально';
@@ -740,13 +745,21 @@ function buildRegime(r) {
   const metrics = [
     { label: 'BTC', value: fmtUsd(r.price), sub: `на ${fmtDate(r.as_of)}` },
     { label: 'Confidence', value: `${r.confidence}%`, sub: 'Сколько условий режима сейчас совпало' },
-    { label: 'Regime score', value: `${r.regime_score > 0 ? '+' : ''}${r.regime_score}`, sub: 'Суммарный наклон сигналов' },
-    { label: 'Stress score', value: `${r.stress_score}/4`, sub: 'Напряжение рынка по воле и просадке' },
+    { label: 'Direction score', value: `${r.direction_score > 0 ? '+' : ''}${r.direction_score}`, sub: 'Чистый directional score без stress-компоненты' },
+    { label: 'Stress score', value: `${r.stress_score}`, sub: 'Отдельный слой турбулентности рынка' },
     { label: 'Momentum 90д', value: `${r.metrics?.momentum_90 ?? '—'}%`, sub: 'Среднесрочный импульс' },
+    { label: 'Цена vs 200DMA', value: `${r.metrics?.close_vs_200 ?? '—'}%`, sub: 'Главный structural filter режима' },
     { label: 'Просадка от ATH', value: `${r.metrics?.drawdown_ath ?? '—'}%`, sub: 'Насколько далеко рынок от пика' },
   ];
 
-  const signalsHtml = (r.signals || []).map(s => `
+  const directionSignalsHtml = (r.direction_signals || []).map(s => `
+    <div class="signal-card ${s.tone}">
+      <div class="signal-label">${s.label}</div>
+      <div class="signal-value ${s.tone}">${s.value}</div>
+      <div class="signal-note">${s.note}</div>
+    </div>
+  `).join('');
+  const stressSignalsHtml = (r.stress_signals || []).map(s => `
     <div class="signal-card ${s.tone}">
       <div class="signal-label">${s.label}</div>
       <div class="signal-value ${s.tone}">${s.value}</div>
@@ -762,6 +775,7 @@ function buildRegime(r) {
         <div class="regime-copy">${r.summary}</div>
         <div class="regime-chips">
           <span class="regime-chip ${tone}">${biasLabel}</span>
+          <span class="regime-chip ${stressChipTone}">${r.stress_label}</span>
           <span class="regime-chip ${tone}">${r.confidence}% confidence</span>
         </div>
       </div>
@@ -775,7 +789,10 @@ function buildRegime(r) {
         `).join('')}
       </div>
     </div>
-    <div class="signal-grid">${signalsHtml}</div>
+    <div style="font-size:12px;color:var(--text2);margin:4px 0 10px;text-transform:uppercase;letter-spacing:0.8px">Direction signals</div>
+    <div class="signal-grid">${directionSignalsHtml}</div>
+    <div style="font-size:12px;color:var(--text2);margin:4px 0 10px;text-transform:uppercase;letter-spacing:0.8px">Stress signals</div>
+    <div class="signal-grid">${stressSignalsHtml}</div>
     <div class="chart-box chart-box-lg"><canvas id="regimeChart"></canvas></div>
   `;
 
@@ -786,8 +803,8 @@ function buildRegime(r) {
       labels: history.map(h => h.date),
       datasets: [
         {
-          label: 'Regime score',
-          data: history.map(h => h.regime_score),
+          label: 'Direction score',
+          data: history.map(h => h.direction_score ?? h.regime_score),
           yAxisID: 'y',
           borderWidth: 2,
           pointRadius: 0,
@@ -798,6 +815,17 @@ function buildRegime(r) {
             borderColor: ctx => ctx.p1.parsed.y >= 0 ? 'rgba(0,255,136,0.85)' : 'rgba(255,59,92,0.85)'
           },
           borderColor: 'rgba(0,212,255,0.85)',
+        },
+        {
+          label: 'Stress score',
+          data: history.map(h => h.stress_score),
+          yAxisID: 'y',
+          borderColor: 'rgba(245,158,11,0.9)',
+          backgroundColor: 'rgba(245,158,11,0.10)',
+          borderDash: [6, 6],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.15,
         },
         {
           label: 'BTC',
@@ -828,8 +856,9 @@ function buildRegime(r) {
               const h = history[items[0].dataIndex];
               return [
                 `Режим: ${h.regime_label}`,
+                `Direction: ${h.direction_score ?? h.regime_score}`,
                 `Confidence: ${h.confidence}%`,
-                `Stress: ${h.stress_score}/4`
+                `Stress: ${h.stress_score} (${h.stress_label})`
               ];
             }
           }
@@ -849,8 +878,8 @@ function buildRegime(r) {
         },
         y: {
           position: 'left',
-          min: -10,
-          max: 10,
+          min: -18,
+          max: 18,
           ticks: { color: '#4b5563', font: { family: 'JetBrains Mono', size: 11 } },
           grid: { color: 'rgba(255,255,255,0.04)' }
         },
