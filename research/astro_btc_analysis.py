@@ -1,5 +1,5 @@
 """
-BTC x Астрология: Корреляционный анализ 2020-2026
+BTC x Астрология: Корреляционный анализ BTC
 Проверяем влияние астрологических факторов на цену биткоина.
 
 Факторы:
@@ -9,7 +9,6 @@ BTC x Астрология: Корреляционный анализ 2020-2026
 4. Луна в знаках зодиака
 5. Аспекты планет (Юпитер-Сатурн, Марс-Юпитер и др.)
 """
-import os
 
 import sqlite3
 import ephem
@@ -22,10 +21,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.db")
-START_DATE = "2020-01-01"
-END_DATE = "2026-03-12"
+from astro_shared import DB_PATH, ZODIAC_SIGNS, get_zodiac_sign
 
 # ============================================================
 # 1. ЗАГРУЗКА ДАННЫХ BTC
@@ -33,10 +29,9 @@ END_DATE = "2026-03-12"
 
 def load_btc_data() -> pd.DataFrame:
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql(f"""
+    df = pd.read_sql("""
         SELECT date, open, high, low, close, volume
         FROM btc_daily
-        WHERE date >= '{START_DATE}' AND date <= '{END_DATE}'
         ORDER BY date
     """, conn)
     conn.close()
@@ -51,18 +46,6 @@ def load_btc_data() -> pd.DataFrame:
 # ============================================================
 # 2. АСТРОЛОГИЧЕСКИЕ РАСЧЁТЫ
 # ============================================================
-
-ZODIAC_SIGNS = [
-    "Овен", "Телец", "Близнецы", "Рак",
-    "Лев", "Дева", "Весы", "Скорпион",
-    "Стрелец", "Козерог", "Водолей", "Рыбы"
-]
-
-def get_zodiac_sign(ra_degrees: float) -> str:
-    """Определяет знак зодиака по эклиптической долготе."""
-    idx = int(ra_degrees / 30) % 12
-    return ZODIAC_SIGNS[idx]
-
 
 def compute_moon_phase(date) -> dict:
     """Вычисляет фазу Луны на дату."""
@@ -185,6 +168,40 @@ def compute_aspects(date) -> list[str]:
                     aspects.append(f"{p1}-{p2}_{aspect_name}")
 
     return aspects
+
+
+# Затмения 2020-2026 (известные даты)
+ECLIPSES = [
+    # (дата, тип)
+    ("2020-01-10", "lunar"),
+    ("2020-06-05", "lunar"),
+    ("2020-06-21", "solar"),
+    ("2020-07-05", "lunar"),
+    ("2020-11-30", "lunar"),
+    ("2020-12-14", "solar"),
+    ("2021-05-26", "lunar"),
+    ("2021-06-10", "solar"),
+    ("2021-11-19", "lunar"),
+    ("2021-12-04", "solar"),
+    ("2022-04-30", "solar"),
+    ("2022-05-16", "lunar"),
+    ("2022-10-25", "solar"),
+    ("2022-11-08", "lunar"),
+    ("2023-04-20", "solar"),
+    ("2023-05-05", "lunar"),
+    ("2023-10-14", "solar"),
+    ("2023-10-28", "lunar"),
+    ("2024-03-25", "lunar"),
+    ("2024-04-08", "solar"),
+    ("2024-09-18", "lunar"),
+    ("2024-10-02", "solar"),
+    ("2025-03-14", "lunar"),
+    ("2025-03-29", "solar"),
+    ("2025-09-07", "lunar"),
+    ("2025-09-21", "solar"),
+    ("2026-02-17", "solar"),
+    ("2026-03-03", "lunar"),
+]
 
 
 # Затмения 2020-2026 (известные даты)

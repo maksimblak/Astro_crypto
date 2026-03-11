@@ -6,6 +6,7 @@ BTC Astro Dashboard — Flask backend.
 
 import sqlite3
 import os
+from datetime import date
 from flask import Flask, jsonify, render_template
 
 app = Flask(__name__)
@@ -47,7 +48,7 @@ def api_pivots():
         rows = conn.execute(
             "SELECT date, price, pivot_type, pct_change, is_high, is_major, "
             "moon_quarter, moon_sign, moon_element, retro_count, tension_count, "
-            "harmony_count, eclipse_days FROM btc_pivot_astro_v2 ORDER BY date"
+            "harmony_count, eclipse_days, near_eclipse FROM btc_pivot_astro_v2 ORDER BY date"
         ).fetchall()
     except sqlite3.OperationalError:
         conn.close()
@@ -59,9 +60,7 @@ def api_pivots():
 @app.route("/api/daily")
 def api_daily():
     conn = get_db()
-    rows = conn.execute(
-        "SELECT date, close FROM btc_daily WHERE date >= '2020-01-01' ORDER BY date"
-    ).fetchall()
+    rows = conn.execute("SELECT date, close FROM btc_daily ORDER BY date").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -70,12 +69,17 @@ def api_daily():
 def api_today():
     conn = get_db()
     try:
-        row = conn.execute(
+        fields = (
             "SELECT date, score, direction, moon_sign, moon_element, quarter, "
             "eclipse_days, moon_ingress, tension, harmony, retro_planets, "
             "station_planets, details FROM btc_astro_calendar "
-            "ORDER BY ABS(julianday(date) - julianday('now')) LIMIT 1"
-        ).fetchone()
+        )
+        target_date = date.today().isoformat()
+        row = conn.execute(fields + "WHERE date = ?", (target_date,)).fetchone()
+        if row is None:
+            row = conn.execute(fields + "WHERE date >= ? ORDER BY date LIMIT 1", (target_date,)).fetchone()
+        if row is None:
+            row = conn.execute(fields + "ORDER BY date DESC LIMIT 1").fetchone()
     except sqlite3.OperationalError:
         conn.close()
         return jsonify({"error": "Calendar not generated yet."}), 404
@@ -87,63 +91,66 @@ def api_today():
 
 @app.route("/api/stats")
 def api_stats():
-    """Model statistics: average scores, thresholds, direction accuracy."""
+    """Out-of-sample model statistics from historical holdout data."""
     conn = get_db()
+    try:
+        period = conn.execute(
+            "SELECT MIN(date) as start_date, MAX(date) as end_date, COUNT(*) as total_days "
+            "FROM btc_astro_history WHERE sample_split = 'test'"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        conn.close()
+        return jsonify({"error": "Table btc_astro_history not found. Run astro_scoring.py first."}), 404
 
-    # Baseline: average score across all calendar days
     baseline = conn.execute(
-        "SELECT AVG(score) as avg_score FROM btc_astro_calendar"
+        "SELECT AVG(score) as avg_score FROM btc_astro_history "
+        "WHERE sample_split = 'test' AND is_pivot = 0"
     ).fetchone()
     baseline_avg = round(baseline["avg_score"], 2) if baseline["avg_score"] else 0
 
-    # Average score of actual pivot days (matched to calendar)
     pivot_avg_row = conn.execute(
-        "SELECT AVG(c.score) as avg_score, COUNT(*) as cnt "
-        "FROM btc_pivot_astro_v2 p "
-        "JOIN btc_astro_calendar c ON c.date = p.date"
+        "SELECT AVG(h.score) as avg_score, COUNT(*) as cnt "
+        "FROM btc_pivots p "
+        "JOIN btc_astro_history h ON h.date = p.date "
+        "WHERE h.sample_split = 'test'"
     ).fetchone()
     pivot_avg = round(pivot_avg_row["avg_score"], 2) if pivot_avg_row["avg_score"] else 0
-    pivot_matched = pivot_avg_row["cnt"]
+    total_pivots = pivot_avg_row["cnt"]
 
-    # Threshold analysis
-    total_cal = conn.execute("SELECT COUNT(*) as c FROM btc_astro_calendar").fetchone()["c"]
-    total_pivots = conn.execute("SELECT COUNT(*) as c FROM btc_pivot_astro_v2").fetchone()["c"]
-
+    total_days = period["total_days"] if period["total_days"] else 0
     thresholds = []
-    for t in [2, 3, 5, 7]:
-        cal_above = conn.execute(
-            "SELECT COUNT(*) as c FROM btc_astro_calendar WHERE score >= ?", (t,)
+    for threshold in [2, 3, 5, 7]:
+        days_above = conn.execute(
+            "SELECT COUNT(*) as c FROM btc_astro_history "
+            "WHERE sample_split = 'test' AND score >= ?",
+            (threshold,),
         ).fetchone()["c"]
-
-        # Pivots that happened on days with score >= threshold
-        # Using btc_pivots (171 rows) matched against calendar
         pivots_above = conn.execute(
             "SELECT COUNT(*) as c FROM btc_pivots p "
-            "JOIN btc_astro_calendar c ON c.date = p.date WHERE c.score >= ?", (t,)
+            "JOIN btc_astro_history h ON h.date = p.date "
+            "WHERE h.sample_split = 'test' AND h.score >= ?",
+            (threshold,),
         ).fetchone()["c"]
 
-        pct_days = round(cal_above / total_cal * 100, 1) if total_cal else 0
-        # Lift = (pivots in high-score days / total pivots) / (high-score days / total days)
-        expected_rate = cal_above / total_cal if total_cal else 1
+        days_pct = round(days_above / total_days * 100, 1) if total_days else 0
+        expected_rate = days_above / total_days if total_days else 0
         actual_rate = pivots_above / total_pivots if total_pivots else 0
         lift = round(actual_rate / expected_rate, 2) if expected_rate > 0 else 0
 
         thresholds.append({
-            "threshold": t,
-            "days_count": cal_above,
-            "days_pct": pct_days,
+            "threshold": threshold,
+            "days_count": days_above,
+            "days_pct": days_pct,
             "pivots_in_zone": pivots_above,
             "lift": lift,
         })
 
-    # Direction accuracy from btc_pivot_astro_v2
-    # direction in calendar: positive = top, negative = bottom
     dir_stats = conn.execute(
         "SELECT COUNT(*) as total, "
-        "SUM(CASE WHEN (c.direction > 0 AND p.is_high = 1) OR (c.direction < 0 AND p.is_high = 0) THEN 1 ELSE 0 END) as correct "
-        "FROM btc_pivot_astro_v2 p "
-        "JOIN btc_astro_calendar c ON c.date = p.date "
-        "WHERE c.direction != 0"
+        "SUM(CASE WHEN (h.direction > 0 AND p.type LIKE '%high') OR (h.direction < 0 AND p.type LIKE '%low') THEN 1 ELSE 0 END) as correct "
+        "FROM btc_pivots p "
+        "JOIN btc_astro_history h ON h.date = p.date "
+        "WHERE h.sample_split = 'test' AND h.direction != 0"
     ).fetchone()
     dir_total = dir_stats["total"] if dir_stats["total"] else 0
     dir_correct = dir_stats["correct"] if dir_stats["correct"] else 0
@@ -154,13 +161,16 @@ def api_stats():
     return jsonify({
         "baseline_avg_score": baseline_avg,
         "pivot_avg_score": pivot_avg,
-        "pivot_matched": pivot_matched,
-        "total_calendar_days": total_cal,
+        "pivot_matched": total_pivots,
+        "total_calendar_days": total_days,
         "total_pivots": total_pivots,
         "thresholds": thresholds,
         "direction_accuracy": dir_accuracy,
         "direction_total": dir_total,
         "direction_correct": dir_correct,
+        "period_start": period["start_date"],
+        "period_end": period["end_date"],
+        "period_label": "holdout",
     })
 
 

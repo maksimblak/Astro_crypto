@@ -3,7 +3,6 @@ BTC x Астрология: Анализ разворотных точек
 Какие астро-условия были в моменты каждого пика и дна?
 Находим паттерны которые чаще совпадают с разворотами.
 """
-import os
 
 import sqlite3
 import ephem
@@ -16,32 +15,7 @@ from collections import Counter
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.db")
-
-ZODIAC_SIGNS = [
-    "Овен", "Телец", "Близнецы", "Рак",
-    "Лев", "Дева", "Весы", "Скорпион",
-    "Стрелец", "Козерог", "Водолей", "Рыбы"
-]
-
-ECLIPSES = [
-    ("2020-01-10", "lunar"), ("2020-06-05", "lunar"), ("2020-06-21", "solar"),
-    ("2020-07-05", "lunar"), ("2020-11-30", "lunar"), ("2020-12-14", "solar"),
-    ("2021-05-26", "lunar"), ("2021-06-10", "solar"), ("2021-11-19", "lunar"),
-    ("2021-12-04", "solar"), ("2022-04-30", "solar"), ("2022-05-16", "lunar"),
-    ("2022-10-25", "solar"), ("2022-11-08", "lunar"), ("2023-04-20", "solar"),
-    ("2023-05-05", "lunar"), ("2023-10-14", "solar"), ("2023-10-28", "lunar"),
-    ("2024-03-25", "lunar"), ("2024-04-08", "solar"), ("2024-09-18", "lunar"),
-    ("2024-10-02", "solar"), ("2025-03-14", "lunar"), ("2025-03-29", "solar"),
-    ("2025-09-07", "lunar"), ("2025-09-21", "solar"), ("2026-02-17", "solar"),
-    ("2026-03-03", "lunar"),
-]
-ECLIPSE_DATES = [datetime.strptime(e[0], "%Y-%m-%d") for e in ECLIPSES]
-
-
-def get_zodiac_sign(lon_deg):
-    return ZODIAC_SIGNS[int(lon_deg / 30) % 12]
+from astro_shared import DB_PATH, ZODIAC_SIGNS, get_zodiac_sign
 
 
 def _is_retrograde(planet_class, d_now, d_prev):
@@ -155,7 +129,6 @@ def load_pivots():
     df = pd.read_sql("""
         SELECT date, price, type, pct_change
         FROM btc_pivots
-        WHERE date >= '2020-01-01'
         ORDER BY date
     """, conn)
     conn.close()
@@ -168,7 +141,6 @@ def load_all_days():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql("""
         SELECT date, close FROM btc_daily
-        WHERE date >= '2020-01-01'
         ORDER BY date
     """, conn)
     conn.close()

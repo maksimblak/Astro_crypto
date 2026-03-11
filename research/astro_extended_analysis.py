@@ -4,7 +4,6 @@ BTC x Астрология: Расширенный анализ V2
 Ингрессии планет, Плутон, Уран, Нептун.
 Глубокий комбинаторный поиск корреляций.
 """
-import os
 
 import sqlite3
 import ephem
@@ -18,51 +17,14 @@ from itertools import combinations
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.db")
-
-ZODIAC_SIGNS = [
-    "Овен", "Телец", "Близнецы", "Рак",
-    "Лев", "Дева", "Весы", "Скорпион",
-    "Стрелец", "Козерог", "Водолей", "Рыбы"
-]
-
-ECLIPSES = [
-    ("2020-01-10", "lunar"), ("2020-06-05", "lunar"), ("2020-06-21", "solar"),
-    ("2020-07-05", "lunar"), ("2020-11-30", "lunar"), ("2020-12-14", "solar"),
-    ("2021-05-26", "lunar"), ("2021-06-10", "solar"), ("2021-11-19", "lunar"),
-    ("2021-12-04", "solar"), ("2022-04-30", "solar"), ("2022-05-16", "lunar"),
-    ("2022-10-25", "solar"), ("2022-11-08", "lunar"), ("2023-04-20", "solar"),
-    ("2023-05-05", "lunar"), ("2023-10-14", "solar"), ("2023-10-28", "lunar"),
-    ("2024-03-25", "lunar"), ("2024-04-08", "solar"), ("2024-09-18", "lunar"),
-    ("2024-10-02", "solar"), ("2025-03-14", "lunar"), ("2025-03-29", "solar"),
-    ("2025-09-07", "lunar"), ("2025-09-21", "solar"), ("2026-02-17", "solar"),
-    ("2026-03-03", "lunar"), ("2026-08-12", "lunar"), ("2026-08-28", "solar"),
-    ("2027-02-06", "lunar"), ("2027-02-20", "solar"),
-    ("2027-07-18", "solar"), ("2027-08-02", "lunar"),
-    ("2028-01-12", "solar"), ("2028-01-26", "lunar"),
-    ("2028-06-26", "lunar"), ("2028-07-11", "solar"), ("2028-12-21", "lunar"),
-]
-ECLIPSE_DATES = [datetime.strptime(e[0], "%Y-%m-%d") for e in ECLIPSES]
-
-# Элементы знаков
-ELEMENT_MAP = {
-    "Овен": "Огонь", "Телец": "Земля", "Близнецы": "Воздух", "Рак": "Вода",
-    "Лев": "Огонь", "Дева": "Земля", "Весы": "Воздух", "Скорпион": "Вода",
-    "Стрелец": "Огонь", "Козерог": "Земля", "Водолей": "Воздух", "Рыбы": "Вода",
-}
-
-# Модальности
-MODALITY_MAP = {
-    "Овен": "Кардинальный", "Телец": "Фиксированный", "Близнецы": "Мутабельный",
-    "Рак": "Кардинальный", "Лев": "Фиксированный", "Дева": "Мутабельный",
-    "Весы": "Кардинальный", "Скорпион": "Фиксированный", "Стрелец": "Мутабельный",
-    "Козерог": "Кардинальный", "Водолей": "Фиксированный", "Рыбы": "Мутабельный",
-}
-
-
-def get_zodiac_sign(lon_deg):
-    return ZODIAC_SIGNS[int(lon_deg % 360 / 30)]
+from astro_shared import (
+    DB_PATH,
+    ELEMENT_MAP,
+    MODALITY_MAP,
+    ZODIAC_SIGNS,
+    apply_bh_correction,
+    get_zodiac_sign,
+)
 
 
 def _get_ecliptic_lon(body):
@@ -365,12 +327,14 @@ def get_extended_astro(date):
 def load_data():
     conn = sqlite3.connect(DB_PATH)
     pivots = pd.read_sql("""
-        SELECT date, price, type, pct_change FROM btc_pivots
-        WHERE date >= '2020-01-01' ORDER BY date
+        SELECT date, price, type, pct_change
+        FROM btc_pivots
+        ORDER BY date
     """, conn)
     all_days = pd.read_sql("""
-        SELECT date, close FROM btc_daily
-        WHERE date >= '2020-01-01' ORDER BY date
+        SELECT date, close
+        FROM btc_daily
+        ORDER BY date
     """, conn)
     conn.close()
     pivots["date"] = pd.to_datetime(pivots["date"])
@@ -704,15 +668,17 @@ def analyze_extended_combos(pdf, bdf):
                 "p_value": round(p_val, 4),
             })
 
-    results.sort(key=lambda x: x["p_value"])
+    apply_bh_correction(results)
+    results.sort(key=lambda x: (x.get("q_value", 1.0), x["p_value"]))
 
-    print(f"\n  Найдено {len(results)} значимых комбинаций")
-    print(f"  {'Комбинация':<50} {'N':>4} {'Разв%':>7} {'Base%':>7} {'Ratio':>7} {'p-value':>10}")
-    print("  " + "-" * 90)
+    print(f"\n  Найдено {len(results)} комбинаций после фильтра по ratio")
+    print(f"  {'Комбинация':<50} {'N':>4} {'Разв%':>7} {'Base%':>7} {'Ratio':>7} {'p-value':>10} {'q-value':>10}")
+    print("  " + "-" * 102)
     for r in results[:30]:
-        sig = " **" if r["p_value"] < 0.01 else " *" if r["p_value"] < 0.05 else ""
+        q_value = r.get("q_value", 1.0)
+        sig = " **" if q_value < 0.01 else " *" if q_value < 0.05 else ""
         print(f"  {r['combo']:<50} {r['pivots']:>4} {r['pivot_pct']:>5.1f}% "
-              f"{r['base_pct']:>5.1f}% {r['ratio']:>6.2f}x {r['p_value']:>10.4f}{sig}")
+              f"{r['base_pct']:>5.1f}% {r['ratio']:>6.2f}x {r['p_value']:>10.4f} {q_value:>10.4f}{sig}")
 
     return results
 
@@ -948,13 +914,13 @@ def plot_extended_results(pdf, bdf, combo_results):
         top = combo_results[:12]
         names = [r["combo"][:35] for r in top]
         ratios = [r["ratio"] for r in top]
-        p_colors = ["#4CAF50" if r["p_value"] < 0.05 else "#FFC107" if r["p_value"] < 0.1 else "#F44336" for r in top]
+        p_colors = ["#4CAF50" if r.get("q_value", 1.0) < 0.05 else "#FFC107" if r["p_value"] < 0.1 else "#F44336" for r in top]
         ax.barh(range(len(names)), ratios, color=p_colors, edgecolor="black", linewidth=0.5)
         ax.set_yticks(range(len(names)))
         ax.set_yticklabels(names, fontsize=7)
         ax.axvline(x=1.0, color="gray", linestyle="--", linewidth=0.5)
         ax.set_xlabel("Ratio (развороты / baseline)")
-        ax.set_title("Топ-12 комбинаций факторов", fontweight="bold")
+        ax.set_title("Топ-12 комбинаций факторов (цвет = FDR)", fontweight="bold")
 
     # 6. Tension vs Harmony + node proximity
     ax = axes[1, 1]
@@ -1044,8 +1010,8 @@ def print_verdict(pdf, bdf, combo_results):
 
     # Комбинации
     for r in combo_results:
-        if r["p_value"] < 0.05:
-            findings.append((r["combo"], r["pivot_pct"], r["base_pct"], r["p_value"], "combo"))
+        if r.get("q_value", 1.0) < 0.05:
+            findings.append((r["combo"], r["pivot_pct"], r["base_pct"], r.get("q_value", r["p_value"]), "combo"))
 
     # Элементы
     for el in ["Огонь", "Земля", "Воздух", "Вода"]:

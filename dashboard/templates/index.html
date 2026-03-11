@@ -355,13 +355,23 @@
 const MO_RU = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
 const MO_RU_FULL = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 
+function parseDateOnly(value) {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
 function fmtDate(d) {
-  const dt = new Date(d);
+  const dt = parseDateOnly(d);
   return dt.getDate() + ' ' + MO_RU[dt.getMonth()] + ' ' + dt.getFullYear();
 }
 function fmtShort(d) {
-  const dt = new Date(d);
+  const dt = parseDateOnly(d);
   return dt.getDate() + ' ' + MO_RU[dt.getMonth()];
+}
+function localDateKey(dt = new Date()) {
+  const year = dt.getFullYear();
+  const month = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 function scrollTo(sel) {
   document.querySelector(sel)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -459,7 +469,7 @@ function buildCalendar(data, filterMonth) {
   const box = document.getElementById('monthFilters');
   box.innerHTML = `<button class="pill ${!filterMonth?'active':''}" onclick="buildCalendar(calendarData)">Все</button>`;
   months.forEach(m => {
-    const dt = new Date(m + '-01');
+    const dt = parseDateOnly(m + '-01');
     const lbl = MO_RU[dt.getMonth()] + ' ' + dt.getFullYear();
     box.innerHTML += `<button class="pill ${filterMonth===m?'active':''}" onclick="buildCalendar(calendarData,'${m}')">${lbl}</button>`;
   });
@@ -598,7 +608,7 @@ function buildPrice(daily, pivots) {
 }
 
 function buildRisk(calendar) {
-  const today = new Date().toISOString().substring(0,10);
+  const today = localDateKey();
   const upcoming = calendar.filter(d => d.date >= today && d.score >= 3).slice(0, 24);
   const grid = document.getElementById('riskGrid');
 
@@ -607,10 +617,10 @@ function buildRisk(calendar) {
     return;
   }
 
-  const todayDate = new Date(today);
+  const todayDate = parseDateOnly(today);
   grid.innerHTML = upcoming.map(d => {
     const cls = d.score >= 5 ? 'hot' : d.score >= 3 ? 'warm' : 'mild';
-    const daysAway = Math.round((new Date(d.date) - todayDate) / 86400000);
+    const daysAway = Math.round((parseDateOnly(d.date) - todayDate) / 86400000);
     const details = (d.details || '').split(' | ').filter(s => s.startsWith('+'));
     const dirHtml = d.direction > 0 ? '<span class="up">&#9650; Пик</span>'
                   : d.direction < 0 ? '<span class="down">&#9660; Дно</span>'
@@ -636,6 +646,9 @@ function buildRisk(calendar) {
 
 function buildStats(s) {
   const block = document.getElementById('statsBlock');
+  const periodText = s.period_start && s.period_end
+    ? `${fmtDate(s.period_start)} - ${fmtDate(s.period_end)}`
+    : 'Период не указан';
 
   const thRows = s.thresholds.map(t => {
     const cls = t.lift >= 2 ? 'lift-good' : t.lift >= 1.2 ? 'lift-ok' : 'lift-meh';
@@ -648,18 +661,21 @@ function buildStats(s) {
   }).join('');
 
   block.innerHTML = `
+    <div style="font-size:12px;color:var(--text2);margin-bottom:14px;text-transform:uppercase;letter-spacing:0.8px">
+      Holdout-валидация: ${periodText}
+    </div>
     <div class="stats-row">
       <div class="stat-block">
         <div class="stat-val">${s.baseline_avg_score}</div>
-        <div class="stat-label">Ср. балл (все дни)</div>
+        <div class="stat-label">Ср. балл (holdout дни)</div>
       </div>
       <div class="stat-block">
         <div class="stat-val accent-green">${s.pivot_avg_score}</div>
-        <div class="stat-label">Ср. балл (развороты)</div>
+        <div class="stat-label">Ср. балл (holdout развороты)</div>
       </div>
       <div class="stat-block">
         <div class="stat-val accent-yellow">${s.total_pivots}</div>
-        <div class="stat-label">Исторических разворотов</div>
+        <div class="stat-label">Разворотов в holdout</div>
       </div>
       <div class="stat-block">
         <div class="stat-val">${s.direction_accuracy}%</div>
@@ -668,7 +684,7 @@ function buildStats(s) {
     </div>
     <div style="font-size:14px;font-weight:600;margin-bottom:8px;color:var(--text2)">Анализ порогов</div>
     <table>
-      <thead><tr><th>Порог</th><th>Дней в календаре</th><th>Поймано разворотов</th><th>Lift</th></tr></thead>
+      <thead><tr><th>Порог</th><th>Дней в holdout</th><th>Поймано разворотов</th><th>Lift</th></tr></thead>
       <tbody>${thRows}</tbody>
     </table>
   `;

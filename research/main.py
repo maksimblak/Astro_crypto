@@ -13,6 +13,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
+from astro_shared import yfinance_exclusive_end
+
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.db")
 
 
@@ -53,8 +55,9 @@ def init_db():
     return conn
 
 
-def download_btc_data(start: str = "2016-01-01", end: str = "2026-03-12") -> pd.DataFrame:
+def download_btc_data(start: str = "2016-01-01", end: str | None = None) -> pd.DataFrame:
     """Загружает daily OHLCV BTC/USD через yfinance."""
+    end = end or yfinance_exclusive_end()
     print(f"Загрузка BTC-USD данных за {start} — {end}...")
     df = yf.download("BTC-USD", start=start, end=end, progress=False)
     df.index = df.index.tz_localize(None)
@@ -354,7 +357,7 @@ def main():
     conn = init_db()
 
     # 2. Загрузка данных
-    df_ohlcv = download_btc_data("2016-01-01", "2026-03-12")
+    df_ohlcv = download_btc_data("2016-01-01")
     prices = df_ohlcv["Close"].squeeze()
 
     # 3. Сохраняем дневные цены в БД
