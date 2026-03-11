@@ -7,7 +7,13 @@ BTC Astro Dashboard — Flask backend.
 import sqlite3
 import os
 from datetime import date
-from flask import Flask, jsonify, render_template
+import numpy as np
+from flask import Flask, Response, jsonify, render_template
+
+try:
+    from .market_regime import build_regime_payload
+except ImportError:
+    from market_regime import build_regime_payload
 
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,9 +26,28 @@ def get_db():
     return conn
 
 
+def derive_thresholds(reference_scores):
+    scores = np.asarray(reference_scores, dtype=float)
+    if len(scores) == 0:
+        return [0.5, 1.0, 1.5, 2.0]
+
+    raw = sorted({round(float(np.quantile(scores, q)), 1) for q in [0.75, 0.85, 0.90, 0.95]})
+    thresholds = [value for value in raw if value > 0]
+    if not thresholds:
+        return [0.5, 1.0, 1.5, 2.0]
+    while len(thresholds) < 4:
+        thresholds.append(round(thresholds[-1] + 0.5, 1))
+    return thresholds[:4]
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return Response(status=204)
 
 
 @app.route("/api/calendar")
@@ -65,6 +90,23 @@ def api_daily():
     return jsonify([dict(r) for r in rows])
 
 
+@app.route("/api/regime")
+def api_regime():
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT date, open, high, low, close, volume FROM btc_daily ORDER BY date"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        conn.close()
+        return jsonify({"error": "Table btc_daily not found. Run research/main.py first."}), 404
+
+    conn.close()
+    if not rows:
+        return jsonify({"error": "No market data found in btc_daily."}), 404
+    return jsonify(build_regime_payload(rows))
+
+
 @app.route("/api/today")
 def api_today():
     conn = get_db()
@@ -102,6 +144,15 @@ def api_stats():
         conn.close()
         return jsonify({"error": "Table btc_astro_history not found. Run astro_scoring.py first."}), 404
 
+    base_scores = [
+        row["score"]
+        for row in conn.execute(
+            "SELECT score FROM btc_astro_history "
+            "WHERE sample_split = 'test' AND is_pivot = 0"
+        ).fetchall()
+    ]
+    score_thresholds = derive_thresholds(base_scores)
+
     baseline = conn.execute(
         "SELECT AVG(score) as avg_score FROM btc_astro_history "
         "WHERE sample_split = 'test' AND is_pivot = 0"
@@ -119,7 +170,7 @@ def api_stats():
 
     total_days = period["total_days"] if period["total_days"] else 0
     thresholds = []
-    for threshold in [2, 3, 5, 7]:
+    for threshold in score_thresholds:
         days_above = conn.execute(
             "SELECT COUNT(*) as c FROM btc_astro_history "
             "WHERE sample_split = 'test' AND score >= ?",
@@ -165,6 +216,12 @@ def api_stats():
         "total_calendar_days": total_days,
         "total_pivots": total_pivots,
         "thresholds": thresholds,
+        "score_scale": {
+            "cool": score_thresholds[0],
+            "warm": score_thresholds[1],
+            "hot": score_thresholds[2],
+            "extreme": score_thresholds[3],
+        },
         "direction_accuracy": dir_accuracy,
         "direction_total": dir_total,
         "direction_correct": dir_correct,

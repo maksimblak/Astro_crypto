@@ -15,7 +15,14 @@ from collections import Counter
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from astro_shared import DB_PATH, ZODIAC_SIGNS, get_zodiac_sign
+try:
+    from .astro_shared import DB_PATH, ECLIPSE_DATES, ZODIAC_SIGNS, get_zodiac_sign
+except ImportError:
+    from astro_shared import DB_PATH, ECLIPSE_DATES, ZODIAC_SIGNS, get_zodiac_sign
+
+START_DATE = "2020-01-01"
+END_DATE = "2026-03-11"
+EVENT_WINDOW_DAYS = 6
 
 
 def _is_retrograde(planet_class, d_now, d_prev):
@@ -32,6 +39,42 @@ def _is_retrograde(planet_class, d_now, d_prev):
     return diff < 0
 
 
+def _is_stationary(planet_class, d_now, orb_days=2):
+    """Планета стационарна, если меняет направление в пределах ±orb_days."""
+    d_before = ephem.Date(d_now - orb_days)
+    d_after = ephem.Date(d_now + orb_days)
+
+    def get_lon(d):
+        return float(ephem.Ecliptic(planet_class(d)).lon)
+
+    lon_before = get_lon(d_before)
+    lon_now = get_lon(d_now)
+    lon_after = get_lon(d_after)
+
+    def norm_diff(a, b):
+        diff = a - b
+        if diff > math.pi:
+            diff -= 2 * math.pi
+        elif diff < -math.pi:
+            diff += 2 * math.pi
+        return diff
+
+    dir_before = norm_diff(lon_now, lon_before)
+    dir_after = norm_diff(lon_after, lon_now)
+    return (dir_before > 0 and dir_after < 0) or (dir_before < 0 and dir_after > 0)
+
+
+def _nearest_station_days(planet_class, date, window_days=EVENT_WINDOW_DAYS):
+    """Ищет ближайшую станцию планеты в окне ±window_days."""
+    nearest = None
+    for offset in range(-window_days, window_days + 1):
+        check_date = ephem.Date(date + timedelta(days=offset))
+        if _is_stationary(planet_class, check_date):
+            dist = abs(offset)
+            nearest = dist if nearest is None else min(nearest, dist)
+    return nearest
+
+
 def get_astro_for_date(date):
     """Полный астро-профиль для конкретной даты."""
     d = ephem.Date(date)
@@ -41,8 +84,12 @@ def get_astro_for_date(date):
     phase = moon.phase / 100.0
     prev_new = ephem.previous_new_moon(d)
     next_new = ephem.next_new_moon(d)
+    prev_full = ephem.previous_full_moon(d)
+    next_full = ephem.next_full_moon(d)
     cycle_len = next_new - prev_new
     position = (d - prev_new) / cycle_len
+    new_moon_days = min(abs(d - prev_new), abs(next_new - d))
+    full_moon_days = min(abs(d - prev_full), abs(next_full - d))
 
     if position < 0.125 or position >= 0.875:
         quarter = "Новолуние"
@@ -62,6 +109,9 @@ def get_astro_for_date(date):
     mercury_retro = _is_retrograde(ephem.Mercury, d, d_prev)
     venus_retro = _is_retrograde(ephem.Venus, d, d_prev)
     mars_retro = _is_retrograde(ephem.Mars, d, d_prev)
+    mercury_station_days = _nearest_station_days(ephem.Mercury, date)
+    venus_station_days = _nearest_station_days(ephem.Venus, date)
+    mars_station_days = _nearest_station_days(ephem.Mars, date)
 
     # Знаки планет
     planets = {
@@ -105,15 +155,26 @@ def get_astro_for_date(date):
     return {
         "moon_phase": round(phase, 3),
         "moon_quarter": quarter,
+        "new_moon_days": round(float(new_moon_days), 2),
+        "full_moon_days": round(float(full_moon_days), 2),
+        "near_new_moon": float(new_moon_days) <= EVENT_WINDOW_DAYS,
+        "near_full_moon": float(full_moon_days) <= EVENT_WINDOW_DAYS,
         "moon_sign": moon_sign,
         "mercury_retro": mercury_retro,
         "venus_retro": venus_retro,
         "mars_retro": mars_retro,
+        "mercury_station_days": mercury_station_days,
+        "venus_station_days": venus_station_days,
+        "mars_station_days": mars_station_days,
+        "near_mercury_station": mercury_station_days is not None,
+        "near_venus_station": venus_station_days is not None,
+        "near_mars_station": mars_station_days is not None,
+        "near_any_station": any(day is not None for day in [mercury_station_days, venus_station_days, mars_station_days]),
         "sun_sign": planet_signs["Солнце"],
         "jupiter_sign": planet_signs["Юпитер"],
         "saturn_sign": planet_signs["Сатурн"],
         "eclipse_days": min_eclipse_days,
-        "near_eclipse": min_eclipse_days <= 7,
+        "near_eclipse": min_eclipse_days <= EVENT_WINDOW_DAYS,
         "aspects": aspects,
         "n_aspects": len(aspects),
         "has_square": any("квадратура" in a for a in aspects),
@@ -126,9 +187,10 @@ def get_astro_for_date(date):
 def load_pivots():
     """Загружает точки разворота из БД."""
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql("""
+    df = pd.read_sql(f"""
         SELECT date, price, type, pct_change
         FROM btc_pivots
+        WHERE date >= '{START_DATE}' AND date <= '{END_DATE}'
         ORDER BY date
     """, conn)
     conn.close()
@@ -139,8 +201,9 @@ def load_pivots():
 def load_all_days():
     """Загружает все торговые дни для сравнения (baseline)."""
     conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql("""
+    df = pd.read_sql(f"""
         SELECT date, close FROM btc_daily
+        WHERE date >= '{START_DATE}' AND date <= '{END_DATE}'
         ORDER BY date
     """, conn)
     conn.close()
@@ -174,7 +237,7 @@ def main():
     pivots = load_pivots()
     all_days_df = load_all_days()
 
-    print(f"Загружено {len(pivots)} точек разворота (с 2020)")
+    print(f"Загружено {len(pivots)} точек разворота ({START_DATE} — {END_DATE})")
     print(f"Загружено {len(all_days_df)} торговых дней для baseline\n")
 
     if len(pivots) == 0 or len(all_days_df) == 0:
@@ -220,8 +283,9 @@ def main():
     # ОТЧЁТ
     # ============================================================
     print("\n" + "=" * 90)
-    print("BTC РАЗВОРОТЫ x АСТРОЛОГИЯ — АНАЛИЗ КОНКРЕТНЫХ ТОЧЕК (2020-2026)")
+    print(f"BTC РАЗВОРОТЫ x АСТРОЛОГИЯ — АНАЛИЗ КОНКРЕТНЫХ ТОЧЕК ({START_DATE} — {END_DATE})")
     print("=" * 90)
+    print(f"Окно для дискретных астро-событий: ±{EVENT_WINDOW_DAYS} дней")
 
     # --- 1. ФАЗЫ ЛУНЫ ---
     print("\n\n" + "-" * 70)
@@ -248,6 +312,34 @@ def main():
               f"{low_q[q]:>5} ({low_pct:>4.1f}%) {base_pct:>8.1f}%{marker}")
 
     print(f"\n  Хи-квадрат тест (развороты vs baseline): χ²={chi2}, p={p_chi}")
+
+    # --- 1b. ОКНА ДО ДИСКРЕТНЫХ СОБЫТИЙ ---
+    print("\n\n" + "-" * 70)
+    print(f"1b. ОКНА ДО ДИСКРЕТНЫХ СОБЫТИЙ (±{EVENT_WINDOW_DAYS} ДНЕЙ)")
+    print("-" * 70)
+
+    window_events = [
+        ("near_new_moon", f"Новолуние ±{EVENT_WINDOW_DAYS}д"),
+        ("near_full_moon", f"Полнолуние ±{EVENT_WINDOW_DAYS}д"),
+        ("near_eclipse", f"Затмение ±{EVENT_WINDOW_DAYS}д"),
+        ("near_mercury_station", f"Станция Меркурия ±{EVENT_WINDOW_DAYS}д"),
+        ("near_venus_station", f"Станция Венеры ±{EVENT_WINDOW_DAYS}д"),
+        ("near_mars_station", f"Станция Марса ±{EVENT_WINDOW_DAYS}д"),
+        ("near_any_station", f"Любая станция ±{EVENT_WINDOW_DAYS}д"),
+    ]
+
+    print(f"\n{'Событие':<28} {'Развороты':>16} {'Пики':>10} {'Дно':>10} {'Baseline%':>10} {'p-value':>10}")
+    for col, label in window_events:
+        event_pivots = int(pdf[col].sum())
+        event_highs = int(highs[col].sum())
+        event_lows = int(lows[col].sum())
+        event_pct = event_pivots / len(pdf) * 100
+        base_rate = bdf[col].mean()
+        base_pct = base_rate * 100
+        p_val = stats.binomtest(event_pivots, len(pdf), max(base_rate, 0.001)).pvalue
+        marker = " *" if p_val < 0.05 else " ~" if p_val < 0.10 else ""
+        print(f"{label:<28} {event_pivots:>5}/{len(pdf):<10} {event_highs:>5}/{len(highs):<4} "
+              f"{event_lows:>5}/{len(lows):<4} {base_pct:>8.1f}% {p_val:>10.4f}{marker}")
 
     # --- 2. ЗНАКИ ЛУНЫ ---
     print("\n\n" + "-" * 70)
@@ -314,9 +406,9 @@ def main():
     near_eclipse_pivots = pdf[pdf["near_eclipse"]]
     near_base = bdf["near_eclipse"].mean() * 100
 
-    print(f"\n  Развороты в ±7 днях от затмения: {len(near_eclipse_pivots)}/{len(pdf)} "
+    print(f"\n  Развороты в ±{EVENT_WINDOW_DAYS} днях от затмения: {len(near_eclipse_pivots)}/{len(pdf)} "
           f"({len(near_eclipse_pivots)/len(pdf)*100:.1f}%)")
-    print(f"  Baseline (обычные дни в ±7д от затмения): {near_base:.1f}%")
+    print(f"  Baseline (обычные дни в ±{EVENT_WINDOW_DAYS}д от затмения): {near_base:.1f}%")
 
     if len(near_eclipse_pivots) > 0:
         p_ecl = stats.binomtest(len(near_eclipse_pivots), len(pdf), bdf["near_eclipse"].mean()).pvalue
@@ -485,7 +577,7 @@ def main():
     ax.hist(pdf["eclipse_days"], bins=30, color="#FF9800", edgecolor="black", linewidth=0.5, alpha=0.7, label="Развороты")
     ax.hist(bdf["eclipse_days"], bins=30, color="#2196F3", edgecolor="black", linewidth=0.5, alpha=0.4,
             weights=np.ones(len(bdf)) * len(pdf) / len(bdf), label="Baseline (масшт.)")
-    ax.axvline(x=7, color="red", linestyle="--", label="±7 дней")
+    ax.axvline(x=EVENT_WINDOW_DAYS, color="red", linestyle="--", label=f"±{EVENT_WINDOW_DAYS} дней")
     ax.set_xlabel("Дней до ближайшего затмения")
     ax.set_ylabel("Количество разворотов")
     ax.set_title("Расстояние от разворотов до затмений", fontweight="bold")
@@ -500,7 +592,7 @@ def main():
     ax.set_xlabel("Разница от baseline (%)")
     ax.set_title(f"Знак Солнца (сезон): развороты vs baseline\nχ²={chi2_sun}, p={p_sun}", fontweight="bold")
 
-    plt.suptitle("BTC Развороты x Астрология — Анализ конкретных точек (2020-2026)",
+    plt.suptitle(f"BTC Развороты x Астрология — Анализ конкретных точек ({START_DATE} — {END_DATE})",
                  fontsize=16, fontweight="bold", y=1.01)
     plt.tight_layout()
     plt.savefig("astro_pivots_results.png", dpi=150, bbox_inches="tight")

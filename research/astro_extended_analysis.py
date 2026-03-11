@@ -19,6 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from astro_shared import (
     DB_PATH,
+    ECLIPSE_DATES,
     ELEMENT_MAP,
     MODALITY_MAP,
     ZODIAC_SIGNS,

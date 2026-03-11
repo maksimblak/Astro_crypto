@@ -237,6 +237,75 @@
   .lift-ok { color: var(--warn); font-weight: 600; }
   .lift-meh { color: var(--text2); }
 
+  .regime-overview { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .regime-main {
+    flex: 0 0 320px;
+    background: linear-gradient(135deg, rgba(59,130,246,0.10), rgba(0,212,255,0.06));
+    border: 1px solid var(--border-glow);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+  }
+  .regime-kicker {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1.1px;
+    color: var(--text2); font-weight: 600;
+  }
+  .regime-title {
+    font-size: 28px; line-height: 1.1; font-weight: 800;
+    margin-top: 8px; letter-spacing: -0.5px;
+  }
+  .regime-copy { margin-top: 10px; font-size: 13px; color: var(--text2); max-width: 38ch; }
+  .regime-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .regime-chip {
+    border-radius: 999px; padding: 5px 10px; font-size: 11px; font-weight: 700;
+    border: 1px solid var(--border); letter-spacing: 0.4px;
+  }
+  .regime-chip.bull { color: var(--bull); background: var(--bull-dim); border-color: rgba(0,255,136,0.16); }
+  .regime-chip.bear { color: var(--bear); background: var(--bear-dim); border-color: rgba(255,59,92,0.16); }
+  .regime-chip.neutral { color: var(--neon-cyan); background: rgba(0,212,255,0.10); border-color: rgba(0,212,255,0.16); }
+  .regime-metrics {
+    flex: 1;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  .regime-metric {
+    background: var(--bg-card2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 18px;
+  }
+  .regime-metric .label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.9px;
+    color: var(--text2); font-weight: 600;
+  }
+  .regime-metric .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 24px; font-weight: 700; margin-top: 6px;
+  }
+  .regime-metric .sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
+  .signal-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px; margin: 18px 0;
+  }
+  .signal-card {
+    background: var(--bg-card2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px 18px;
+  }
+  .signal-card.bull { border-left: 3px solid var(--bull); }
+  .signal-card.bear { border-left: 3px solid var(--bear); }
+  .signal-card.neutral { border-left: 3px solid var(--text3); }
+  .signal-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+    color: var(--text2); font-weight: 600;
+  }
+  .signal-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px; font-weight: 700; margin-top: 8px;
+  }
+  .signal-value.bull { color: var(--bull); }
+  .signal-value.bear { color: var(--bear); }
+  .signal-value.neutral { color: var(--text); }
+  .signal-note { margin-top: 6px; font-size: 12px; color: var(--text2); line-height: 1.45; }
+
   .footer {
     text-align: center; padding: 40px 0 24px;
     font-size: 12px; color: var(--text3);
@@ -286,6 +355,7 @@
     <div class="nav-pills">
       <button class="nav-pill active" onclick="scrollTo('#sectionCalendar')">Календарь</button>
       <button class="nav-pill" onclick="scrollTo('#sectionChart')">График</button>
+      <button class="nav-pill" onclick="scrollTo('#sectionRegime')">Режим</button>
       <button class="nav-pill" onclick="scrollTo('#sectionRisk')">Зоны риска</button>
       <button class="nav-pill" onclick="scrollTo('#sectionStats')">Статистика</button>
     </div>
@@ -322,6 +392,16 @@
     </div>
     <div class="card">
       <div class="chart-box chart-box-lg"><canvas id="priceChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Рыночный режим -->
+  <div class="section" id="sectionRegime">
+    <div class="section-head">
+      <div class="section-title"><span class="dot" style="background:var(--bull);box-shadow:var(--glow-green)"></span> Рыночный режим</div>
+    </div>
+    <div class="card" id="regimeBlock">
+      <div class="loading">Определение режима рынка</div>
     </div>
   </div>
 
@@ -397,18 +477,34 @@ function scoreBarBorder(s) {
   return '#4b5563';
 }
 
-let calendarData = [], calChart = null;
+let calendarData = [], calChart = null, regimeChart = null;
+
+function regimeTone(code) {
+  if (code === 'bull' || code === 'recovery') return 'bull';
+  if (code === 'bear' || code === 'panic' || code === 'distribution') return 'bear';
+  return 'neutral';
+}
+function fmtUsd(v) {
+  if (v == null) return '—';
+  return '$' + Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+}
+function showBlockError(id, message) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = `<div class="loading" style="animation:none">${message}</div>`;
+}
 
 async function init() {
-  const [todayR, calR, dailyR, pivotsR, statsR] = await Promise.all([
+  const [todayR, calR, dailyR, pivotsR, statsR, regimeR] = await Promise.all([
     fetch('/api/today'), fetch('/api/calendar'), fetch('/api/daily'),
-    fetch('/api/pivots'), fetch('/api/stats')
+    fetch('/api/pivots'), fetch('/api/stats'), fetch('/api/regime')
   ]);
   const today = await todayR.json();
   calendarData = await calR.json();
   const daily = await dailyR.json();
   const pivots = await pivotsR.json();
   const stats = await statsR.json();
+  const regime = await regimeR.json();
 
   // Если какие-то API вернули ошибку — обработаем
   if (Array.isArray(calendarData)) {
@@ -417,6 +513,11 @@ async function init() {
   }
   if (today.date) buildHero(today);
   if (Array.isArray(daily) && Array.isArray(pivots)) buildPrice(daily, pivots);
+  if (Array.isArray(regime.history)) {
+    buildRegime(regime);
+  } else if (regime.error) {
+    showBlockError('regimeBlock', regime.error);
+  }
   if (stats.thresholds) buildStats(stats);
 }
 
@@ -601,6 +702,146 @@ function buildPrice(daily, pivots) {
             callback: v => '$' + (v>=1000 ? (v/1000).toFixed(0)+'k' : v)
           },
           grid: { color: 'rgba(255,255,255,0.04)' },
+        }
+      }
+    }
+  });
+}
+
+function buildRegime(r) {
+  const tone = regimeTone(r.regime_code);
+  const biasLabel = r.bias === 'risk-on' ? 'Risk-on'
+                  : r.bias === 'risk-off' ? 'Risk-off'
+                  : 'Нейтрально';
+  const history = r.history || [];
+  const block = document.getElementById('regimeBlock');
+
+  const metrics = [
+    { label: 'BTC', value: fmtUsd(r.price), sub: `на ${fmtDate(r.as_of)}` },
+    { label: 'Confidence', value: `${r.confidence}%`, sub: 'Сколько условий режима сейчас совпало' },
+    { label: 'Regime score', value: `${r.regime_score > 0 ? '+' : ''}${r.regime_score}`, sub: 'Суммарный наклон сигналов' },
+    { label: 'Stress score', value: `${r.stress_score}/4`, sub: 'Напряжение рынка по воле и просадке' },
+    { label: 'Momentum 90д', value: `${r.metrics?.momentum_90 ?? '—'}%`, sub: 'Среднесрочный импульс' },
+    { label: 'Просадка от ATH', value: `${r.metrics?.drawdown_ath ?? '—'}%`, sub: 'Насколько далеко рынок от пика' },
+  ];
+
+  const signalsHtml = (r.signals || []).map(s => `
+    <div class="signal-card ${s.tone}">
+      <div class="signal-label">${s.label}</div>
+      <div class="signal-value ${s.tone}">${s.value}</div>
+      <div class="signal-note">${s.note}</div>
+    </div>
+  `).join('');
+
+  block.innerHTML = `
+    <div class="regime-overview">
+      <div class="regime-main">
+        <div class="regime-kicker">Режим на ${fmtDate(r.as_of)}</div>
+        <div class="regime-title">${r.regime_label}</div>
+        <div class="regime-copy">${r.summary}</div>
+        <div class="regime-chips">
+          <span class="regime-chip ${tone}">${biasLabel}</span>
+          <span class="regime-chip ${tone}">${r.confidence}% confidence</span>
+        </div>
+      </div>
+      <div class="regime-metrics">
+        ${metrics.map(m => `
+          <div class="regime-metric">
+            <div class="label">${m.label}</div>
+            <div class="value">${m.value}</div>
+            <div class="sub">${m.sub}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    <div class="signal-grid">${signalsHtml}</div>
+    <div class="chart-box chart-box-lg"><canvas id="regimeChart"></canvas></div>
+  `;
+
+  if (regimeChart) regimeChart.destroy();
+  regimeChart = new Chart(document.getElementById('regimeChart').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: history.map(h => h.date),
+      datasets: [
+        {
+          label: 'Regime score',
+          data: history.map(h => h.regime_score),
+          yAxisID: 'y',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.18,
+          fill: 'origin',
+          backgroundColor: 'rgba(0,212,255,0.08)',
+          segment: {
+            borderColor: ctx => ctx.p1.parsed.y >= 0 ? 'rgba(0,255,136,0.85)' : 'rgba(255,59,92,0.85)'
+          },
+          borderColor: 'rgba(0,212,255,0.85)',
+        },
+        {
+          label: 'BTC',
+          data: history.map(h => h.close),
+          yAxisID: 'y1',
+          borderColor: 'rgba(59,130,246,0.65)',
+          pointRadius: 0,
+          tension: 0.15,
+          borderWidth: 1.5,
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#9ca3af', font: { size: 12 }, usePointStyle: true, pointStyle: 'line' }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(17,24,39,0.95)',
+          borderColor: 'rgba(0,212,255,0.2)', borderWidth: 1,
+          titleColor: '#e8eaed', bodyColor: '#9ca3af',
+          padding: 12, cornerRadius: 10,
+          callbacks: {
+            title: (items) => fmtDate(history[items[0].dataIndex].date),
+            afterBody: (items) => {
+              const h = history[items[0].dataIndex];
+              return [
+                `Режим: ${h.regime_label}`,
+                `Confidence: ${h.confidence}%`,
+                `Stress: ${h.stress_score}/4`
+              ];
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: '#4b5563',
+            maxTicksLimit: 14,
+            callback: function(v) {
+              const d = this.getLabelForValue(v);
+              return d ? d.substring(0, 7) : '';
+            }
+          },
+          grid: { display: false }
+        },
+        y: {
+          position: 'left',
+          min: -10,
+          max: 10,
+          ticks: { color: '#4b5563', font: { family: 'JetBrains Mono', size: 11 } },
+          grid: { color: 'rgba(255,255,255,0.04)' }
+        },
+        y1: {
+          position: 'right',
+          type: 'logarithmic',
+          ticks: {
+            color: '#4b5563',
+            font: { family: 'JetBrains Mono', size: 11 },
+            callback: v => '$' + (v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v)
+          },
+          grid: { drawOnChartArea: false }
         }
       }
     }

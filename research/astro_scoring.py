@@ -1,48 +1,140 @@
 """
-BTC Астро-скоринг: модель вероятности разворота.
-Строит балл для любой даты на основе найденных корреляций.
-Проверяет на исторических данных + генерирует календарь.
+BTC Астро-скоринг: честная train/holdout-модель для разворотов.
+
+Подход:
+1. Считаем только реальные астрономические признаки через ephem.
+2. Обучаем веса признаков только на train-части истории.
+3. Проверяем на holdout без ручных подгонок.
+4. После валидации переобучаемся на полной истории для будущего календаря.
 """
 
-import sqlite3
-import ephem
 import math
-import pandas as pd
-import numpy as np
+import sqlite3
 from datetime import datetime, timedelta
-from scipy import stats
+from functools import lru_cache
+
+import ephem
 import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from scipy import stats
 
-from astro_shared import (
-    DB_PATH,
-    ECLIPSE_DATES,
-    ELEMENT_MAP,
-    MAJOR_TRANSIT_DATES,
-    MODALITY_MAP,
-    RETROGRADES_KNOWN,
-    ZODIAC_SIGNS,
-    get_zodiac_sign,
-    today_local_date,
-)
+matplotlib.use("Agg")
+
+try:
+    from .astro_shared import (
+        DB_PATH,
+        ECLIPSE_DATES,
+        ELEMENT_MAP,
+        MODALITY_MAP,
+        get_zodiac_sign,
+        today_local_date,
+    )
+except ImportError:
+    from astro_shared import (
+        DB_PATH,
+        ECLIPSE_DATES,
+        ELEMENT_MAP,
+        MODALITY_MAP,
+        get_zodiac_sign,
+        today_local_date,
+    )
 
 
-# ============================================================
-# АСТРО-РАСЧЁТЫ (из extended_analysis)
-# ============================================================
+RETRO_PLANETS = {
+    "Меркурий": ephem.Mercury,
+    "Венера": ephem.Venus,
+    "Марс": ephem.Mars,
+    "Юпитер": ephem.Jupiter,
+    "Сатурн": ephem.Saturn,
+    "Уран": ephem.Uranus,
+    "Нептун": ephem.Neptune,
+    "Плутон": ephem.Pluto,
+}
+
+STATION_PLANETS = {
+    "Меркурий": ephem.Mercury,
+    "Венера": ephem.Venus,
+    "Марс": ephem.Mars,
+    "Юпитер": ephem.Jupiter,
+    "Сатурн": ephem.Saturn,
+}
+
+SLOW_INGRESS_PLANETS = {
+    "Юпитер": ephem.Jupiter,
+    "Сатурн": ephem.Saturn,
+    "Уран": ephem.Uranus,
+    "Нептун": ephem.Neptune,
+    "Плутон": ephem.Pluto,
+}
+
+REVERSAL_FEATURE_LABELS = {
+    "moon_ingress": "Ингрессия Луны",
+    "moon_node_conj": "Луна у узла",
+    "moon_node_square": "Луна квадрат узлам",
+    "saturn_square_nodes": "Сатурн квадрат узлам",
+}
+
+CONTINUOUS_REVERSAL_FEATURE_LABELS = {
+    "days_to_eclipse": "Дни до затмения",
+    "station_strength": "Сила станции",
+    "moon_age_sin": "Лунный цикл sin",
+    "moon_age_cos": "Лунный цикл cos",
+}
+
+DIRECTION_FEATURE_LABELS = {
+    "moon_ingress": "Ингрессия Луны",
+    "any_station": "Стационарная планета",
+    "eclipse_3d": "Затмение ±3д",
+    "eclipse_7d": "Затмение ±7д",
+    "moon_water": "Луна в Воде",
+    "moon_earth": "Луна в Земле",
+    "moon_cardinal": "Луна в кардинальном знаке",
+    "moon_node_conj": "Луна у узла",
+    "moon_node_square": "Луна квадрат узлам",
+    "saturn_square_nodes": "Сатурн квадрат узлам",
+}
+
+
+@lru_cache(maxsize=None)
+def _planet_lon_for_ordinal(planet_name: str, ordinal: int) -> float:
+    planet_class = RETRO_PLANETS[planet_name]
+    return _get_ecliptic_lon(planet_class(ephem.Date(datetime.fromordinal(ordinal))))
+
+
+@lru_cache(maxsize=None)
+def _planet_speed_for_ordinal(planet_name: str, ordinal: int) -> float:
+    lon_now = _planet_lon_for_ordinal(planet_name, ordinal)
+    lon_prev = _planet_lon_for_ordinal(planet_name, ordinal - 1)
+    diff = lon_now - lon_prev
+    if diff > 180:
+        diff -= 360
+    elif diff < -180:
+        diff += 360
+    return diff
+
 
 def _get_ecliptic_lon(body):
     return float(ephem.Ecliptic(body).lon) * 180 / math.pi
+
+
+def _angular_distance_deg(lon_a: float, lon_b: float) -> float:
+    diff = abs(lon_a - lon_b)
+    return diff if diff <= 180 else 360 - diff
+
 
 def _is_retrograde(planet_class, d_now, d_prev):
     lon_now = _get_ecliptic_lon(planet_class(d_now))
     lon_prev = _get_ecliptic_lon(planet_class(d_prev))
     diff = lon_now - lon_prev
-    if diff > 180: diff -= 360
-    elif diff < -180: diff += 360
+    if diff > 180:
+        diff -= 360
+    elif diff < -180:
+        diff += 360
     return diff < 0
+
 
 def _is_stationary(planet_class, d_now, orb_days=2):
     d_before = ephem.Date(d_now - orb_days)
@@ -50,23 +142,27 @@ def _is_stationary(planet_class, d_now, orb_days=2):
     lon_before = _get_ecliptic_lon(planet_class(d_before))
     lon_now = _get_ecliptic_lon(planet_class(d_now))
     lon_after = _get_ecliptic_lon(planet_class(d_after))
+
     def norm(a, b):
-        d = a - b
-        if d > 180: d -= 360
-        elif d < -180: d += 360
-        return d
+        diff = a - b
+        if diff > 180:
+            diff -= 360
+        elif diff < -180:
+            diff += 360
+        return diff
+
     d1 = norm(lon_now, lon_before)
     d2 = norm(lon_after, lon_now)
     return (d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)
 
+
 def _get_lunar_node(d):
     jd = ephem.julian_date(d)
-    T = (jd - 2451545.0) / 36525.0
-    omega = 125.04452 - 1934.136261 * T + 0.0020708 * T**2 + T**3 / 450000
+    t = (jd - 2451545.0) / 36525.0
+    omega = 125.04452 - 1934.136261 * t + 0.0020708 * t**2 + t**3 / 450000
     omega = omega % 360
-    if omega < 0:
-        omega += 360
-    return omega
+    return omega if omega >= 0 else omega + 360
+
 
 def _detect_ingress(planet_class, d, window_hours=12):
     d_before = ephem.Date(d - window_hours / 24.0)
@@ -80,189 +176,109 @@ def _detect_ingress(planet_class, d, window_hours=12):
         return True, sign_after
     return False, None
 
+
 def _days_to_nearest_phase(d):
-    """Дней до ближайшего новолуния и полнолуния."""
     prev_new = ephem.previous_new_moon(d)
     next_new = ephem.next_new_moon(d)
-    dist_new = min(abs(d - prev_new), abs(next_new - d))
     prev_full = ephem.previous_full_moon(d)
     next_full = ephem.next_full_moon(d)
+    dist_new = min(abs(d - prev_new), abs(next_new - d))
     dist_full = min(abs(d - prev_full), abs(next_full - d))
     return float(dist_new), float(dist_full)
 
 
-# ============================================================
-# СКОРИНГОВАЯ МОДЕЛЬ
-# ============================================================
-
-def compute_score(date):
-    """
-    Астро-скоринг для даты.
-    Возвращает (total_score, details, direction_bias).
-    direction_bias: >0 → скорее пик, <0 → скорее дно.
-    """
-    d = ephem.Date(date)
-    d_prev = ephem.Date(date - timedelta(days=1))
-    moon = ephem.Moon(d)
-
-    score = 0.0
-    direction = 0.0  # >0 пик, <0 дно
-    details = []
-
-    # === 1. Новолуние / Полнолуние (±2д) — ratio 1.42x ===
-    dist_new, dist_full = _days_to_nearest_phase(d)
-    dist_phase = min(dist_new, dist_full)
-
-    if dist_phase <= 1:
-        score += 2.0
-        phase_name = "новолуние" if dist_new < dist_full else "полнолуние"
-        details.append(f"+2.0  ±1д от {phase_name} ({dist_phase:.1f}д)")
-    elif dist_phase <= 2:
-        score += 1.0
-        phase_name = "новолуние" if dist_new < dist_full else "полнолуние"
-        details.append(f"+1.0  ±2д от {phase_name} ({dist_phase:.1f}д)")
-
-    # Четверти — антисигнал
+def _quarter_distance(d):
     prev_fq = ephem.previous_first_quarter_moon(d)
     next_fq = ephem.next_first_quarter_moon(d)
     prev_lq = ephem.previous_last_quarter_moon(d)
     next_lq = ephem.next_last_quarter_moon(d)
     dist_fq = min(abs(d - prev_fq), abs(next_fq - d))
     dist_lq = min(abs(d - prev_lq), abs(next_lq - d))
-    dist_quarter = min(float(dist_fq), float(dist_lq))
+    return float(min(dist_fq, dist_lq))
 
-    if dist_quarter <= 1:
-        score -= 1.0
-        details.append(f"-1.0  ±1д от четверти Луны (антисигнал)")
 
-    # === 2. Затмение ±7д — ratio 2.25x ===
-    min_eclipse = min(abs((date - ed).days) for ed in ECLIPSE_DATES)
-    if min_eclipse <= 3:
-        score += 3.0
-        details.append(f"+3.0  Затмение ±3д ({min_eclipse}д)")
-    elif min_eclipse <= 7:
-        score += 2.0
-        details.append(f"+2.0  Затмение ±7д ({min_eclipse}д)")
+def _classify_quarter(d):
+    prev_new = ephem.previous_new_moon(d)
+    next_new = ephem.next_new_moon(d)
+    cycle_len = next_new - prev_new
+    position = (d - prev_new) / cycle_len
+    if position < 0.125 or position >= 0.875:
+        return "Новолуние"
+    if position < 0.375:
+        return "Растущая"
+    if position < 0.625:
+        return "Полнолуние"
+    return "Убывающая"
 
-    # === 3. Ингрессия Луны — ratio 1.38x, пики 1.95x ===
-    moon_ingress, new_sign = _detect_ingress(ephem.Moon, d, window_hours=6)
-    if moon_ingress:
-        score += 1.5
-        details.append(f"+1.5  Ингрессия Луны → {new_sign}")
-        direction += 1.0  # чаще пики
 
-    # === 4. Ретроградность ===
-    planet_classes = {
-        "Меркурий": ephem.Mercury, "Венера": ephem.Venus, "Марс": ephem.Mars,
-        "Юпитер": ephem.Jupiter, "Сатурн": ephem.Saturn,
-    }
-    PLANET_NAME_MAP = {
-        "Mercury": "Меркурий", "Venus": "Венера", "Mars": "Марс",
-        "Jupiter": "Юпитер", "Saturn": "Сатурн", "Uranus": "Уран",
-        "Neptune": "Нептун", "Pluto": "Плутон",
-    }
+def _station_event_strength(planet_name: str, ordinal: int) -> float:
+    if planet_name not in STATION_PLANETS:
+        return 0.0
 
-    retro_planets = []
-    if date.year >= 2026:
-        # Справочник ретроградов (проверенные данные из интернета)
-        for start_s, end_s, planet_en in RETROGRADES_KNOWN:
-            r_start = datetime.strptime(start_s, "%Y-%m-%d")
-            r_end = datetime.strptime(end_s, "%Y-%m-%d")
-            if r_start <= date <= r_end:
-                ru_name = PLANET_NAME_MAP.get(planet_en, planet_en)
-                if ru_name not in retro_planets:
-                    retro_planets.append(ru_name)
-    else:
-        for name, cls in planet_classes.items():
-            if _is_retrograde(cls, d, d_prev):
-                retro_planets.append(name)
+    planet_class = STATION_PLANETS[planet_name]
+    check_date = ephem.Date(datetime.fromordinal(ordinal))
+    if not _is_stationary(planet_class, check_date, orb_days=1):
+        return 0.0
 
-    mars_retro = "Марс" in retro_planets
-    jupiter_retro = "Юпитер" in retro_planets
+    speed_before = abs(_planet_speed_for_ordinal(planet_name, ordinal))
+    speed_after = abs(_planet_speed_for_ordinal(planet_name, ordinal + 1))
+    local_scale = max(speed_before, speed_after, 1e-6)
+    slowness = 1.0 - min(speed_before, speed_after) / local_scale
+    return max(0.0, min(1.0, slowness))
 
-    # Марс ретро + затмение — ratio 4.86x
-    if mars_retro and min_eclipse <= 7:
-        score += 2.0
-        details.append(f"+2.0  Марс ретро + затмение (4.86x)")
 
-    # Марс + Юпитер ретро вместе — ratio 1.96x
-    if mars_retro and jupiter_retro:
-        score += 1.0
-        details.append(f"+1.0  Марс + Юпитер ретро")
+def _station_strength(date, window_days=6):
+    ordinal = date.date().toordinal()
+    best = 0.0
+    for planet_name in STATION_PLANETS:
+        for offset in range(-window_days, window_days + 1):
+            event_strength = _station_event_strength(planet_name, ordinal + offset)
+            if event_strength <= 0:
+                continue
+            proximity = math.exp(-abs(offset) / 3.0)
+            best = max(best, event_strength * proximity)
+    return round(best, 4)
 
-    # Много ретро (≥2)
-    if len(retro_planets) >= 2:
-        score += 0.5
-        details.append(f"+0.5  {len(retro_planets)} ретро планет ({', '.join(retro_planets)})")
 
-    # Много ретро (≥4) — редкое событие, дополнительный бонус
-    if len(retro_planets) >= 4:
-        score += 1.0
-        details.append(f"+1.0  Массовый ретроград ({len(retro_planets)} планет)")
+def extract_astro_profile(date):
+    d = ephem.Date(date)
+    d_prev = ephem.Date(date - timedelta(days=1))
+    moon = ephem.Moon(d)
 
-    # === 4b. Крупные планетарные транзиты ===
-    for transit_date, transit_desc in MAJOR_TRANSIT_DATES.items():
-        days_diff = abs((date - transit_date).days)
-        if days_diff <= 3:
-            # Соединение Сатурн-Нептун — раз в 36 лет, максимальный бонус
-            if "Сатурн-Нептун" in transit_desc:
-                score += 3.0
-                details.append(f"+3.0  {transit_desc} (±{days_diff}д, раз в 36 лет!)")
-            # Трины Уран-Плутон — раз в 140 лет
-            elif "Уран-Плутон" in transit_desc:
-                score += 2.0
-                details.append(f"+2.0  {transit_desc} (±{days_diff}д)")
-            # Ингрессии планет в новый знак
-            else:
-                score += 1.5
-                details.append(f"+1.5  {transit_desc} (±{days_diff}д)")
-        elif days_diff <= 7:
-            if "Сатурн-Нептун" in transit_desc:
-                score += 2.0
-                details.append(f"+2.0  {transit_desc} (±{days_diff}д)")
-            elif "Уран-Плутон" in transit_desc:
-                score += 1.0
-                details.append(f"+1.0  {transit_desc} (±{days_diff}д)")
-            else:
-                score += 0.5
-                details.append(f"+0.5  {transit_desc} (±{days_diff}д)")
-
-    # === 5. Стационарные планеты ===
-    station_planets = []
-    for name, cls in planet_classes.items():
-        if _is_stationary(cls, d):
-            station_planets.append(name)
-
-    if station_planets:
-        score += 1.5
-        details.append(f"+1.5  Стационарные: {', '.join(station_planets)}")
-        direction -= 1.0  # чаще дно
-
-    # === 6. Аспекты к лунным узлам ===
     moon_lon = _get_ecliptic_lon(moon)
+    moon_sign = get_zodiac_sign(moon_lon)
+    moon_element = ELEMENT_MAP[moon_sign]
+    moon_modality = MODALITY_MAP[moon_sign]
+
+    dist_new, dist_full = _days_to_nearest_phase(d)
+    dist_quarter = _quarter_distance(d)
+    quarter = _classify_quarter(d)
+    prev_new = ephem.previous_new_moon(d)
+    next_new = ephem.next_new_moon(d)
+    cycle_len = next_new - prev_new
+    moon_cycle_pos = float((d - prev_new) / cycle_len)
+    moon_cycle_angle = 2 * math.pi * moon_cycle_pos
+
+    min_eclipse = min(abs((date - ed).days) for ed in ECLIPSE_DATES)
+    moon_ingress, new_sign = _detect_ingress(ephem.Moon, d, window_hours=6)
+    station_strength = _station_strength(date)
+
+    retro_planets = [name for name, cls in RETRO_PLANETS.items() if _is_retrograde(cls, d, d_prev)]
+    station_planets = [name for name, cls in STATION_PLANETS.items() if _is_stationary(cls, d)]
+
+    slow_ingresses = []
+    for name, cls in SLOW_INGRESS_PLANETS.items():
+        is_ingress, ingress_sign = _detect_ingress(cls, d, window_hours=24)
+        if is_ingress:
+            slow_ingresses.append(f"{name} -> {ingress_sign}")
+
     rahu_lon = _get_lunar_node(d)
     ketu_lon = (rahu_lon + 180) % 360
-
-    moon_rahu = abs(moon_lon - rahu_lon)
-    if moon_rahu > 180: moon_rahu = 360 - moon_rahu
-
-    # Луна-квадратура-узлов — 1.82x
-    if abs(moon_rahu - 90) <= 8 or moon_rahu <= 10:
-        score += 1.0
-        if moon_rahu <= 10:
-            details.append(f"+1.0  Луна-конъюнкция-Раху ({moon_rahu:.0f}°)")
-        else:
-            details.append(f"+1.0  Луна-квадратура-узлов ({moon_rahu:.0f}°)")
-
-    # Сатурн-квадратура-узлов — 1.59x
+    moon_rahu = _angular_distance_deg(moon_lon, rahu_lon)
+    moon_ketu = _angular_distance_deg(moon_lon, ketu_lon)
     saturn_lon = _get_ecliptic_lon(ephem.Saturn(d))
-    sat_rahu = abs(saturn_lon - rahu_lon)
-    if sat_rahu > 180: sat_rahu = 360 - sat_rahu
-    if abs(sat_rahu - 90) <= 8:
-        score += 0.5
-        details.append(f"+0.5  Сатурн-квадратура-узлов")
+    saturn_rahu = _angular_distance_deg(saturn_lon, rahu_lon)
 
-    # === 7. Напряжённые аспекты ===
     bodies = {
         "Луна": moon_lon,
         "Солнце": _get_ecliptic_lon(ephem.Sun(d)),
@@ -275,157 +291,303 @@ def compute_score(date):
 
     tension = 0
     harmony = 0
-    body_names = list(bodies.keys())
-    for i in range(len(body_names)):
-        for j in range(i + 1, len(body_names)):
-            diff = abs(bodies[body_names[i]] - bodies[body_names[j]])
-            if diff > 180: diff = 360 - diff
+    for i, name_i in enumerate(bodies):
+        for name_j in list(bodies.keys())[i + 1:]:
+            diff = abs(bodies[name_i] - bodies[name_j])
+            diff = diff if diff <= 180 else 360 - diff
             if abs(diff - 90) <= 8 or abs(diff - 180) <= 8:
                 tension += 1
             elif abs(diff - 120) <= 8 or abs(diff - 60) <= 6:
                 harmony += 1
 
-    if tension >= 3:
-        score += 1.0
-        details.append(f"+1.0  Высокое напряжение ({tension} аспектов)")
-
-    # === 8. Направление (пик vs дно) ===
-    moon_sign = get_zodiac_sign(moon_lon)
-    moon_element = ELEMENT_MAP[moon_sign]
-    moon_modality = MODALITY_MAP[moon_sign]
-
-    # Вода → пики (+16.8% перекос)
-    if moon_element == "Вода":
-        direction += 1.5
-        details.append(f"  ↑ Луна в Воде ({moon_sign}) → скорее пик")
-    # Земля → дно (+11.3% перекос)
-    elif moon_element == "Земля":
-        direction -= 1.0
-        details.append(f"  ↓ Луна в Земле ({moon_sign}) → скорее дно")
-
-    # Мутабельный → пики (+10%)
-    if moon_modality == "Мутабельный":
-        direction += 0.5
-    elif moon_modality == "Кардинальный":
-        direction -= 0.5
-
-    # Фаза Луны
-    prev_new_moon = ephem.previous_new_moon(d)
-    next_new_moon = ephem.next_new_moon(d)
-    cycle_len = next_new_moon - prev_new_moon
-    position = (d - prev_new_moon) / cycle_len
-
-    if position < 0.125 or position >= 0.875:
-        quarter = "Новолуние"
-    elif 0.125 <= position < 0.375:
-        quarter = "Растущая"
-    elif 0.375 <= position < 0.625:
-        quarter = "Полнолуние"
-    else:
-        quarter = "Убывающая"
+    features = {
+        "new_1d": dist_new <= 1,
+        "new_2d": 1 < dist_new <= 2,
+        "full_1d": dist_full <= 1,
+        "full_2d": 1 < dist_full <= 2,
+        "quarter_1d": dist_quarter <= 1,
+        "eclipse_3d": min_eclipse <= 3,
+        "eclipse_7d": 3 < min_eclipse <= 7,
+        "moon_ingress": moon_ingress,
+        "mars_retro": "Марс" in retro_planets,
+        "jupiter_retro": "Юпитер" in retro_planets,
+        "mars_jupiter_retro": "Марс" in retro_planets and "Юпитер" in retro_planets,
+        "retro_2plus": len(retro_planets) >= 2,
+        "retro_4plus": len(retro_planets) >= 4,
+        "any_station": bool(station_planets),
+        "slow_ingress": bool(slow_ingresses),
+        "moon_node_conj": moon_rahu <= 10 or moon_ketu <= 10,
+        "moon_node_square": abs(moon_rahu - 90) <= 8,
+        "saturn_square_nodes": abs(saturn_rahu - 90) <= 8,
+        "tension_3plus": tension >= 3,
+        "moon_water": moon_element == "Вода",
+        "moon_earth": moon_element == "Земля",
+        "moon_mutable": moon_modality == "Мутабельный",
+        "moon_cardinal": moon_modality == "Кардинальный",
+        "days_to_eclipse": float(min_eclipse),
+        "station_strength": station_strength,
+        "moon_age_sin": math.sin(moon_cycle_angle),
+        "moon_age_cos": math.cos(moon_cycle_angle),
+    }
 
     return {
-        "score": round(score, 1),
-        "direction": round(direction, 1),
-        "details": details,
+        "date": date,
+        "score": 0.0,
+        "direction": 0.0,
+        "details": [],
         "moon_sign": moon_sign,
         "moon_element": moon_element,
         "quarter": quarter,
         "retro_planets": retro_planets,
         "station_planets": station_planets,
         "eclipse_days": min_eclipse,
+        "station_strength": station_strength,
         "moon_ingress": moon_ingress,
         "tension": tension,
         "harmony": harmony,
+        "moon_ingress_sign": new_sign,
+        "slow_ingresses": slow_ingresses,
+        **features,
     }
 
 
-# ============================================================
-# ВАЛИДАЦИЯ НА ИСТОРИЧЕСКИХ ДАННЫХ
-# ============================================================
-
 def load_historical_data():
     conn = sqlite3.connect(DB_PATH)
-    pivots = pd.read_sql("""
+    pivots = pd.read_sql(
+        """
         SELECT date, price, type, pct_change
         FROM btc_pivots
         ORDER BY date
-    """, conn)
-    all_days = pd.read_sql("""
+        """,
+        conn,
+    )
+    all_days = pd.read_sql(
+        """
         SELECT date, close
         FROM btc_daily
         ORDER BY date
-    """, conn)
+        """,
+        conn,
+    )
     conn.close()
-
     pivots["date"] = pd.to_datetime(pivots["date"])
     all_days["date"] = pd.to_datetime(all_days["date"])
     return pivots, all_days
 
 
-def build_history_scores(all_days: pd.DataFrame) -> pd.DataFrame:
-    print("\nПодсчёт астроскоров для всей истории...")
+def build_history_features(all_days: pd.DataFrame) -> pd.DataFrame:
+    print("\nПодсчёт астропризнаков для всей истории...")
     records = []
-
     for idx, row in all_days.iterrows():
-        result = compute_score(row["date"].to_pydatetime())
-        result["date"] = row["date"]
-        result["close"] = row["close"]
-        records.append(result)
-
+        record = extract_astro_profile(row["date"].to_pydatetime())
+        record["close"] = row["close"]
+        records.append(record)
         if (idx + 1) % 250 == 0:
             print(f"  {idx + 1}/{len(all_days)} дней...")
-
     return pd.DataFrame(records).sort_values("date").reset_index(drop=True)
+
+
+def annotate_pivots(history_df: pd.DataFrame, pivots: pd.DataFrame) -> pd.DataFrame:
+    pivot_meta = pivots.copy()
+    pivot_meta["is_pivot"] = True
+    pivot_meta["is_high"] = pivot_meta["type"].str.contains("high")
+    merged = history_df.merge(
+        pivot_meta[["date", "price", "type", "pct_change", "is_pivot", "is_high"]],
+        on="date",
+        how="left",
+        validate="one_to_one",
+    )
+    merged["is_pivot"] = merged["is_pivot"].fillna(False).astype(bool)
+    merged["is_high"] = merged["is_high"].fillna(False).astype(bool)
+    return merged
 
 
 def assign_sample_split(history_df: pd.DataFrame, test_ratio: float = 0.20) -> tuple[pd.DataFrame, pd.Timestamp]:
     history_df = history_df.sort_values("date").reset_index(drop=True).copy()
-    if len(history_df) < 2:
-        history_df["sample_split"] = "test"
-        return history_df, history_df["date"].iloc[0]
-
-    split_idx = max(1, int(len(history_df) * (1 - test_ratio)))
-    split_idx = min(split_idx, len(history_df) - 1)
+    split_idx = max(1, min(int(len(history_df) * (1 - test_ratio)), len(history_df) - 1))
     split_start = history_df.loc[split_idx, "date"]
     history_df["sample_split"] = np.where(history_df["date"] >= split_start, "test", "train")
     return history_df, split_start
 
 
-def build_pivot_scores(pivots: pd.DataFrame, history_df: pd.DataFrame) -> pd.DataFrame:
-    score_cols = [
-        "date",
-        "score",
-        "direction",
-        "sample_split",
-        "moon_sign",
-        "moon_element",
-        "quarter",
-        "eclipse_days",
-        "moon_ingress",
-        "tension",
-        "harmony",
-    ]
-    pdf = pivots.merge(history_df[score_cols], on="date", how="left", validate="many_to_one")
-    pdf["is_high"] = pdf["type"].str.contains("high")
-    pdf["is_major"] = pdf["type"].str.contains("major|global")
-    return pdf
+def _shrunken_weight(lift: float, p_value: float, scale: float, p_cap: float) -> float:
+    lift = max(lift, 1e-6)
+    strength = abs(math.log2(lift))
+    shrink = max(0.0, min(1.0, (p_cap - p_value) / p_cap))
+    return round(min(scale, strength * scale * shrink), 2)
 
 
-def print_validation_block(label: str, pdf: pd.DataFrame, base_arr: np.ndarray) -> dict:
+def _continuous_weight(effect_size: float, p_value: float, scale: float = 0.75, p_cap: float = 0.25) -> float:
+    shrink = max(0.0, min(1.0, (p_cap - p_value) / p_cap))
+    raw = effect_size * scale * shrink
+    return round(max(-1.0, min(1.0, raw)), 2)
+
+
+def fit_reversal_model(train_df: pd.DataFrame) -> dict:
+    train_df = train_df.copy()
+    train_df["is_pivot"] = train_df["is_pivot"].astype(bool)
+    pivots = train_df[train_df["is_pivot"]]
+    non_pivots = train_df[~train_df["is_pivot"]]
+
+    weights = {}
+    diagnostics = []
+    continuous_weights = {}
+    continuous_diagnostics = []
+
+    for col, label in REVERSAL_FEATURE_LABELS.items():
+        pivot_count = int(pivots[col].sum())
+        base_rate = float(non_pivots[col].mean())
+        if pivot_count < 4 or base_rate <= 0 or base_rate >= 1:
+            continue
+        p_value = stats.binomtest(pivot_count, len(pivots), base_rate).pvalue
+        pivot_pct = pivot_count / len(pivots)
+        lift = pivot_pct / base_rate
+        if p_value <= 0.25:
+            weight = _shrunken_weight(lift, p_value, scale=3.0, p_cap=0.25)
+            if pivot_pct < base_rate:
+                weight *= -1
+            if abs(weight) >= 0.15:
+                weights[col] = weight
+        diagnostics.append((label, pivot_pct * 100, base_rate * 100, p_value))
+
+    for col, label in CONTINUOUS_REVERSAL_FEATURE_LABELS.items():
+        pivot_values = pivots[col].astype(float)
+        base_values = non_pivots[col].astype(float)
+        base_std = float(base_values.std(ddof=0))
+        if base_std <= 1e-9:
+            continue
+
+        t_stat, p_value = stats.ttest_ind(pivot_values, base_values, equal_var=False)
+        effect_size = (float(pivot_values.mean()) - float(base_values.mean())) / base_std
+        weight = _continuous_weight(effect_size, p_value)
+        if p_value <= 0.25 and abs(weight) >= 0.05:
+            continuous_weights[col] = {
+                "weight": weight,
+                "mean": float(base_values.mean()),
+                "std": base_std,
+            }
+        continuous_diagnostics.append((label, float(pivot_values.mean()), float(base_values.mean()), float(p_value), float(effect_size)))
+
+    return {
+        "weights": weights,
+        "diagnostics": diagnostics,
+        "continuous_weights": continuous_weights,
+        "continuous_diagnostics": continuous_diagnostics,
+    }
+
+
+def fit_direction_model(train_df: pd.DataFrame) -> dict:
+    train_df = train_df.copy()
+    train_df["is_pivot"] = train_df["is_pivot"].astype(bool)
+    train_df["is_high"] = train_df["is_high"].astype(bool)
+    pivots = train_df[train_df["is_pivot"]]
+    highs = pivots[pivots["is_high"]]
+    lows = pivots[~pivots["is_high"]]
+
+    weights = {}
+    diagnostics = []
+
+    for col, label in DIRECTION_FEATURE_LABELS.items():
+        high_count = int(highs[col].sum())
+        low_count = int(lows[col].sum())
+        total_active = high_count + low_count
+        if total_active < 4:
+            continue
+        table = np.array([[high_count, len(highs) - high_count], [low_count, len(lows) - low_count]])
+        _, p_value = stats.fisher_exact(table)
+        high_rate = high_count / max(len(highs), 1)
+        low_rate = low_count / max(len(lows), 1)
+        lift = (high_rate + 1e-6) / (low_rate + 1e-6)
+        if p_value <= 0.35:
+            weight = _shrunken_weight(lift, p_value, scale=2.0, p_cap=0.35)
+            if high_rate < low_rate:
+                weight *= -1
+            if abs(weight) >= 0.10:
+                weights[col] = weight
+        diagnostics.append((label, high_rate * 100, low_rate * 100, p_value))
+
+    return {
+        "weights": weights,
+        "diagnostics": diagnostics,
+    }
+
+
+def fit_scoring_model(train_df: pd.DataFrame) -> dict:
+    return {
+        "reversal_model": fit_reversal_model(train_df),
+        "direction_model": fit_direction_model(train_df),
+    }
+
+
+def apply_model_to_profile(profile: dict, model: dict) -> dict:
+    profile = dict(profile)
+    reversal_score = 0.0
+    direction_score = 0.0
+    reversal_details = []
+    direction_details = []
+
+    for col, weight in model["reversal_model"]["weights"].items():
+        if profile.get(col):
+            reversal_score += weight
+            reversal_details.append(f"{weight:+.1f}  {REVERSAL_FEATURE_LABELS[col]}")
+
+    for col, params in model["reversal_model"]["continuous_weights"].items():
+        std = max(params["std"], 1e-9)
+        z_value = (float(profile.get(col, 0.0)) - params["mean"]) / std
+        z_value = max(-2.0, min(2.0, z_value))
+        contribution = params["weight"] * z_value
+        if abs(contribution) >= 0.05:
+            reversal_score += contribution
+            reversal_details.append(f"{contribution:+.1f}  {CONTINUOUS_REVERSAL_FEATURE_LABELS[col]}")
+
+    for col, weight in model["direction_model"]["weights"].items():
+        if profile.get(col):
+            direction_score += weight
+
+    for col, label in DIRECTION_FEATURE_LABELS.items():
+        weight = model["direction_model"]["weights"].get(col)
+        if weight and profile.get(col) and abs(weight) >= 0.4:
+            arrow = "↑" if weight > 0 else "↓"
+            target = "пик" if weight > 0 else "дно"
+            direction_details.append(f"  {arrow} {label} → скорее {target}")
+
+    profile["reversal_score"] = round(reversal_score, 1)
+    profile["direction_score"] = round(direction_score, 1)
+    profile["score"] = profile["reversal_score"]
+    profile["direction"] = profile["direction_score"]
+    profile["reversal_details"] = reversal_details
+    profile["direction_details"] = direction_details
+    profile["details"] = reversal_details + direction_details
+    return profile
+
+
+def score_history(history_df: pd.DataFrame, model: dict) -> pd.DataFrame:
+    records = []
+    for _, row in history_df.iterrows():
+        scored = apply_model_to_profile(row.to_dict(), model)
+        records.append(scored)
+    return pd.DataFrame(records)
+
+
+def derive_thresholds(reference_scores: np.ndarray) -> list[float]:
+    if len(reference_scores) == 0:
+        return [0.5, 1.0, 1.5, 2.0]
+    raw = sorted({round(float(np.quantile(reference_scores, q)), 1) for q in [0.75, 0.85, 0.90, 0.95]})
+    thresholds = [value for value in raw if value > 0]
+    if not thresholds:
+        return [0.5, 1.0, 1.5, 2.0]
+    while len(thresholds) < 4:
+        thresholds.append(round(thresholds[-1] + 0.5, 1))
+    return thresholds[:4]
+
+
+def print_validation_block(label: str, pdf: pd.DataFrame, base_arr: np.ndarray, thresholds: list[float]) -> dict:
     print(f"\n  --- {label} ---")
     print(f"  Разворотов: {len(pdf)}, непивотных дней: {len(base_arr)}")
 
     if len(pdf) == 0 or len(base_arr) == 0:
         print("  Недостаточно данных для статистики.")
-        return {
-            "pivot_count": len(pdf),
-            "base_count": len(base_arr),
-            "avg_score": 0.0,
-            "pivot_avg_score": 0.0,
-            "direction_accuracy": 0.0,
-            "thresholds": [],
-        }
+        return {"direction_accuracy": 0.0, "thresholds": []}
 
     print(f"  {'':>20} {'Развороты':>12} {'Непивотные':>12}")
     print(f"  {'Среднее':<20} {pdf['score'].mean():>12.2f} {base_arr.mean():>12.2f}")
@@ -440,60 +602,74 @@ def print_validation_block(label: str, pdf: pd.DataFrame, base_arr: np.ndarray) 
     print(f"  Mann-Whitney U: p={p_mw:.4f}")
 
     print(f"\n  {'Порог':>8} {'Разворотов':>12} {'Pivot%':>8} {'Base%':>8} {'Lift':>8} {'Precision':>10}")
-    thresholds = []
-    for threshold in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]:
+    threshold_rows = []
+    for threshold in thresholds:
         p_above = int((pdf["score"] >= threshold).sum())
-        b_above = float((base_arr >= threshold).mean() * 100)
+        b_above_pct = float((base_arr >= threshold).mean() * 100)
         p_pct = p_above / len(pdf) * 100
-
-        if b_above > 0:
-            lift = p_pct / b_above
-        else:
-            lift = float("inf") if p_above > 0 else 0.0
-
+        lift = p_pct / b_above_pct if b_above_pct > 0 else 0.0
         total_days_above = int((base_arr >= threshold).sum())
         precision = p_above / max(p_above + total_days_above, 1) * 100
-        thresholds.append({
-            "threshold": threshold,
-            "pivots_above": p_above,
-            "pivot_pct": round(p_pct, 1),
-            "base_pct": round(b_above, 1),
-            "lift": round(lift, 2) if lift != float("inf") else float("inf"),
-            "precision": round(precision, 1),
-        })
+        threshold_rows.append(
+            {
+                "threshold": threshold,
+                "pivot_pct": round(p_pct, 1),
+                "base_pct": round(b_above_pct, 1),
+                "lift": round(lift, 2),
+                "precision": round(precision, 1),
+            }
+        )
+        print(
+            f"  {threshold:>6.1f}+ {p_above:>6}/{len(pdf):>3} {p_pct:>6.1f}% "
+            f"{b_above_pct:>6.1f}% {lift:>7.2f}x {precision:>8.1f}%"
+        )
 
-        print(f"  {threshold:>6.0f}+ {p_above:>6}/{len(pdf):>3} {p_pct:>6.1f}% {b_above:>6.1f}% "
-              f"{lift:>7.2f}x {precision:>8.1f}%")
-
+    pdf = pdf.copy()
+    pdf["is_high"] = pdf["is_high"].astype(bool)
     highs = pdf[pdf["is_high"]]
     lows = pdf[~pdf["is_high"]]
     correct_dir = int((highs["direction"] > 0).sum() + (lows["direction"] < 0).sum())
     total_with_dir = int((highs["direction"] != 0).sum() + (lows["direction"] != 0).sum())
     direction_accuracy = correct_dir / total_with_dir * 100 if total_with_dir else 0.0
 
-    print(f"\n  Пики ({len(highs)}): ср. скор = {highs['score'].mean():.2f}, ср. direction = {highs['direction'].mean():.2f}")
-    print(f"  Дно ({len(lows)}): ср. скор = {lows['score'].mean():.2f}, ср. direction = {lows['direction'].mean():.2f}")
+    print(f"\n  Пики ({len(highs)}): ср. reversal = {highs['score'].mean():.2f}, ср. direction = {highs['direction'].mean():.2f}")
+    print(f"  Дно ({len(lows)}): ср. reversal = {lows['score'].mean():.2f}, ср. direction = {lows['direction'].mean():.2f}")
     if total_with_dir:
         print(f"  Точность направления: {correct_dir}/{total_with_dir} ({direction_accuracy:.1f}%)")
 
-    top = pdf.nlargest(10, "score")
-    if len(top) > 0:
-        print(f"\n  Топ-10 разворотов по скору ({label}):")
-        for _, row in top.iterrows():
-            dir_arrow = "↑ пик" if row["direction"] > 0 else "↓ дно" if row["direction"] < 0 else "—"
-            print(
-                f"  {row['date'].strftime('%Y-%m-%d')}  ${row['price']:>9,.0f}  "
-                f"{row['type']:<15} скор={row['score']:>4.1f}  {dir_arrow}"
-            )
-
     return {
-        "pivot_count": len(pdf),
-        "base_count": len(base_arr),
-        "avg_score": round(float(base_arr.mean()), 2),
-        "pivot_avg_score": round(float(pdf["score"].mean()), 2),
         "direction_accuracy": round(direction_accuracy, 1),
-        "thresholds": thresholds,
+        "t_test_p": round(p_value, 4),
+        "mw_p": round(p_mw, 4),
+        "thresholds": threshold_rows,
     }
+
+
+def print_model_summary(model: dict):
+    print("\n  Обученные весы reversal-модели:")
+    if model["reversal_model"]["weights"]:
+        for col, weight in sorted(model["reversal_model"]["weights"].items(), key=lambda item: abs(item[1]), reverse=True):
+            print(f"    {REVERSAL_FEATURE_LABELS[col]:<35} {weight:+.2f}")
+    else:
+        print("    Нет отобранных признаков.")
+
+    print("\n  Обученные continuous reversal-веса:")
+    if model["reversal_model"]["continuous_weights"]:
+        for col, params in sorted(
+            model["reversal_model"]["continuous_weights"].items(),
+            key=lambda item: abs(item[1]["weight"]),
+            reverse=True,
+        ):
+            print(f"    {CONTINUOUS_REVERSAL_FEATURE_LABELS[col]:<35} {params['weight']:+.2f}")
+    else:
+        print("    Нет отобранных признаков.")
+
+    print("\n  Обученные весы direction-модели:")
+    if model["direction_model"]["weights"]:
+        for col, weight in sorted(model["direction_model"]["weights"].items(), key=lambda item: abs(item[1]), reverse=True):
+            print(f"    {DIRECTION_FEATURE_LABELS[col]:<35} {weight:+.2f}")
+    else:
+        print("    Нет отобранных признаков.")
 
 
 def validate_model():
@@ -502,74 +678,93 @@ def validate_model():
     print("=" * 90)
 
     pivots, all_days = load_historical_data()
-    history_df = build_history_scores(all_days)
+    history_df = build_history_features(all_days)
+    history_df = annotate_pivots(history_df, pivots)
     history_df, split_start = assign_sample_split(history_df)
-    history_df["is_pivot"] = history_df["date"].isin(set(pivots["date"]))
-    pdf = build_pivot_scores(pivots, history_df)
+
+    train_df = history_df[history_df["sample_split"] == "train"].copy()
+    train_model = fit_scoring_model(train_df)
+    print_model_summary(train_model)
+
+    scored_history = score_history(history_df, train_model)
+    scored_history["close"] = history_df["close"]
+    scored_history["type"] = history_df["type"]
+    scored_history["price"] = history_df["price"]
+    scored_history["pct_change"] = history_df["pct_change"]
+    scored_history["is_pivot"] = history_df["is_pivot"].astype(bool)
+    scored_history["is_high"] = history_df["is_high"].astype(bool)
+    scored_history["sample_split"] = history_df["sample_split"]
 
     print(
-        f"\nИстория: {history_df['date'].min().strftime('%Y-%m-%d')} — "
-        f"{history_df['date'].max().strftime('%Y-%m-%d')}"
+        f"\nИстория: {scored_history['date'].min().strftime('%Y-%m-%d')} — "
+        f"{scored_history['date'].max().strftime('%Y-%m-%d')}"
     )
     print(
         f"Holdout split: train < {split_start.strftime('%Y-%m-%d')}, "
         f"test >= {split_start.strftime('%Y-%m-%d')}"
     )
 
-    train_pdf = pdf[pdf["sample_split"] == "train"].copy()
-    train_base = history_df[
-        (history_df["sample_split"] == "train") & (~history_df["is_pivot"])
-    ]["score"].to_numpy()
-    test_pdf = pdf[pdf["sample_split"] == "test"].copy()
-    test_base = history_df[
-        (history_df["sample_split"] == "test") & (~history_df["is_pivot"])
-    ]["score"].to_numpy()
+    train_pdf = scored_history[(scored_history["sample_split"] == "train") & (scored_history["is_pivot"])].copy()
+    train_base = scored_history[(scored_history["sample_split"] == "train") & (~scored_history["is_pivot"])]["score"].to_numpy()
+    thresholds = derive_thresholds(train_base)
+    print(f"\n  Пороги из train non-pivot quantiles: {', '.join(f'{t:.1f}' for t in thresholds)}")
 
-    print_validation_block("TRAIN", train_pdf, train_base)
-    test_metrics = print_validation_block("TEST (holdout)", test_pdf, test_base)
+    test_pdf = scored_history[(scored_history["sample_split"] == "test") & (scored_history["is_pivot"])].copy()
+    test_base = scored_history[(scored_history["sample_split"] == "test") & (~scored_history["is_pivot"])]["score"].to_numpy()
 
-    return history_df, test_pdf, test_base, test_metrics
+    train_metrics = print_validation_block("TRAIN", train_pdf, train_base, thresholds)
+    test_metrics = print_validation_block("TEST (holdout)", test_pdf, test_base, thresholds)
+
+    full_model = fit_scoring_model(history_df)
+    full_scored_history = score_history(history_df, full_model)
+    full_scored_history["close"] = history_df["close"]
+    full_scored_history["type"] = history_df["type"]
+    full_scored_history["price"] = history_df["price"]
+    full_scored_history["pct_change"] = history_df["pct_change"]
+    full_scored_history["is_pivot"] = history_df["is_pivot"].astype(bool)
+    full_scored_history["is_high"] = history_df["is_high"].astype(bool)
+    full_scored_history["sample_split"] = history_df["sample_split"]
+    full_base = full_scored_history[~full_scored_history["is_pivot"]]["score"].to_numpy()
+    full_thresholds = derive_thresholds(full_base)
+
+    return scored_history, test_pdf, test_base, test_metrics, full_model, thresholds, full_scored_history, full_thresholds
 
 
-# ============================================================
-# АСТРО-КАЛЕНДАРЬ
-# ============================================================
-
-def generate_calendar(start_date, end_date):
+def generate_calendar(start_date, end_date, model, thresholds):
     print(f"\n\n{'=' * 90}")
     print(f"АСТРО-КАЛЕНДАРЬ BTC: {start_date.strftime('%Y-%m-%d')} — {end_date.strftime('%Y-%m-%d')}")
     print(f"{'=' * 90}")
 
-    days = []
+    rows = []
     current = start_date
     while current <= end_date:
-        result = compute_score(current)
-        result["date"] = current
-        days.append(result)
+        profile = extract_astro_profile(current)
+        scored = apply_model_to_profile(profile, model)
+        rows.append(scored)
         current += timedelta(days=1)
 
-    df = pd.DataFrame(days)
+    df = pd.DataFrame(rows)
+    hot_threshold = thresholds[min(2, len(thresholds) - 1)]
+    warm_threshold = thresholds[0]
 
-    # Зоны повышенного риска (score >= 3)
-    hot_zones = df[df["score"] >= 3].copy()
-
+    hot_zones = df[df["score"] >= hot_threshold].copy()
     if len(hot_zones) > 0:
-        print(f"\n  ЗОНЫ ПОВЫШЕННОГО РИСКА РАЗВОРОТА (скор ≥ 3):")
+        print(f"\n  ЗОНЫ ПОВЫШЕННОГО РИСКА РАЗВОРОТА (reversal_score ≥ {hot_threshold:.1f}):")
         print(f"  {'Дата':<12} {'Скор':>5} {'Направл.':>10} {'Луна':>15} {'Детали'}")
         print("  " + "-" * 85)
-
         for _, row in hot_zones.iterrows():
             dir_str = "↑ скорее пик" if row["direction"] > 0 else "↓ скорее дно" if row["direction"] < 0 else "нейтрально"
             moon_info = f"{row['quarter'][:4]} {row['moon_sign']}"
-            detail_short = "; ".join(d.strip().split("  ")[-1][:40] for d in row["details"] if d.startswith("+"))
-            print(f"  {row['date'].strftime('%Y-%m-%d'):<12} {row['score']:>5.1f} "
-                  f"{dir_str:>12} {moon_info:>15}  {detail_short[:50]}")
+            detail_short = "; ".join(d.strip().split("  ")[-1][:40] for d in row["details"] if d.startswith(("+", "-")))
+            print(
+                f"  {row['date'].strftime('%Y-%m-%d'):<12} {row['score']:>5.1f} "
+                f"{dir_str:>12} {moon_info:>15}  {detail_short[:50]}"
+            )
     else:
-        print(f"\n  Зон с высоким скором не найдено в этом периоде.")
+        print("\n  Зон с высоким скором не найдено.")
 
-    # Кластеры (группируем дни подряд)
-    print(f"\n\n  КЛАСТЕРЫ (дни подряд с score ≥ 2):")
-    cluster_days = df[df["score"] >= 2]
+    print(f"\n\n  КЛАСТЕРЫ (дни подряд с reversal_score ≥ {warm_threshold:.1f}):")
+    cluster_days = df[df["score"] >= warm_threshold]
     if len(cluster_days) > 0:
         clusters = []
         current_cluster = []
@@ -577,8 +772,7 @@ def generate_calendar(start_date, end_date):
             if not current_cluster or (row["date"] - current_cluster[-1]["date"]).days <= 2:
                 current_cluster.append(row)
             else:
-                if len(current_cluster) >= 1:
-                    clusters.append(current_cluster)
+                clusters.append(current_cluster)
                 current_cluster = [row]
         if current_cluster:
             clusters.append(current_cluster)
@@ -588,124 +782,112 @@ def generate_calendar(start_date, end_date):
             end = cluster[-1]["date"]
             max_score = max(c["score"] for c in cluster)
             avg_dir = np.mean([c["direction"] for c in cluster])
-            dir_str = "↑ ПИК" if avg_dir > 0.5 else "↓ ДНО" if avg_dir < -0.5 else "?"
-
+            dir_str = "↑ ПИК" if avg_dir > 0.4 else "↓ ДНО" if avg_dir < -0.4 else "?"
             if (end - start).days == 0:
                 print(f"  {start.strftime('%Y-%m-%d'):>12}           макс={max_score:.1f}  {dir_str}")
             else:
                 print(f"  {start.strftime('%Y-%m-%d')} — {end.strftime('%Y-%m-%d')}  макс={max_score:.1f}  {dir_str}")
 
-    # Месячная сводка
-    print(f"\n\n  МЕСЯЧНАЯ СВОДКА:")
-    df["month"] = df["date"].apply(lambda x: x.strftime("%Y-%m"))
-    monthly = df.groupby("month").agg(
-        avg_score=("score", "mean"),
-        max_score=("score", "max"),
-        hot_days=("score", lambda x: (x >= 3).sum()),
-    ).reset_index()
-
-    print(f"  {'Месяц':<10} {'Ср. скор':>10} {'Макс':>6} {'Горячих дней':>14}")
-    for _, row in monthly.iterrows():
-        bar = "█" * int(row["hot_days"])
-        print(f"  {row['month']:<10} {row['avg_score']:>10.2f} {row['max_score']:>6.1f} {int(row['hot_days']):>10}  {bar}")
-
     return df
 
 
-# ============================================================
-# ВИЗУАЛИЗАЦИЯ
-# ============================================================
-
-def plot_results(pdf, base_arr, calendar_df):
+def plot_results(pdf, base_arr, calendar_df, thresholds):
     fig, axes = plt.subplots(2, 2, figsize=(22, 14))
+    hot_threshold = thresholds[min(2, len(thresholds) - 1)]
+    warm_threshold = thresholds[0]
+    pdf = pdf.copy()
+    pdf["is_high"] = pdf["is_high"].astype(bool)
 
-    # 1. Распределение скоров: развороты vs baseline
     ax = axes[0, 0]
-    bins = np.arange(0, max(pdf["score"].max(), base_arr.max()) + 1, 0.5)
-    ax.hist(base_arr, bins=bins, color="#4ECDC4", alpha=0.6, label="Непивотные дни (holdout)", edgecolor="black", linewidth=0.3,
-            weights=np.ones(len(base_arr)) * len(pdf) / len(base_arr))
+    bins = np.arange(min(pdf["score"].min(), base_arr.min()) - 0.5, max(pdf["score"].max(), base_arr.max()) + 0.6, 0.5)
+    ax.hist(
+        base_arr,
+        bins=bins,
+        color="#4ECDC4",
+        alpha=0.6,
+        label="Непивотные дни (holdout)",
+        edgecolor="black",
+        linewidth=0.3,
+        weights=np.ones(len(base_arr)) * len(pdf) / len(base_arr),
+    )
     ax.hist(pdf["score"], bins=bins, color="#FF6B6B", alpha=0.7, label="Развороты (holdout)", edgecolor="black", linewidth=0.3)
-    ax.set_xlabel("Астро-скор")
+    ax.set_xlabel("Reversal score")
     ax.set_ylabel("Кол-во")
-    ax.set_title("Распределение скоров: holdout развороты vs непивотные дни", fontweight="bold")
+    ax.set_title("Распределение reversal score: holdout развороты vs непивотные дни", fontweight="bold")
+    ax.axvline(x=hot_threshold, color="red", linestyle="--", alpha=0.5)
     ax.legend()
-    ax.axvline(x=3, color="red", linestyle="--", alpha=0.5, label="Порог ≥3")
 
-    # 2. Score timeline + пики/дно
     ax = axes[0, 1]
     highs = pdf[pdf["is_high"]]
     lows = pdf[~pdf["is_high"]]
     ax.scatter(highs["date"], highs["score"], c="red", s=60, label="Пики", edgecolors="black", linewidths=0.3, zorder=3)
     ax.scatter(lows["date"], lows["score"], c="green", s=60, label="Дно", edgecolors="black", linewidths=0.3, zorder=3)
-    ax.axhline(y=3, color="orange", linestyle="--", alpha=0.5, label="Порог ≥3")
+    ax.axhline(y=hot_threshold, color="orange", linestyle="--", alpha=0.5)
     ax.set_xlabel("Дата")
-    ax.set_ylabel("Астро-скор")
-    ax.set_title("Скор разворотов по времени (holdout-период)", fontweight="bold")
+    ax.set_ylabel("Reversal score")
+    ax.set_title("Reversal score по времени (holdout-период)", fontweight="bold")
     ax.legend(fontsize=8)
     ax.xaxis.set_major_locator(mdates.YearLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
 
-    # 3. Direction: пики vs дно
     ax = axes[1, 0]
     ax.scatter(highs["direction"], highs["score"], c="red", s=60, label="Пики", edgecolors="black", linewidths=0.3)
     ax.scatter(lows["direction"], lows["score"], c="green", s=60, label="Дно", edgecolors="black", linewidths=0.3)
-    ax.axvline(x=0, color="gray", linestyle="-", linewidth=0.5)
-    ax.axhline(y=3, color="orange", linestyle="--", alpha=0.5)
+    ax.axvline(x=0, color="gray", linewidth=0.5)
+    ax.axhline(y=hot_threshold, color="orange", linestyle="--", alpha=0.5)
     ax.set_xlabel("Direction bias (>0 = пик, <0 = дно)")
-    ax.set_ylabel("Астро-скор")
-    ax.set_title("Скор vs Направление", fontweight="bold")
+    ax.set_ylabel("Reversal score")
+    ax.set_title("Reversal score vs Direction score", fontweight="bold")
     ax.legend()
 
-    # 4. Астро-календарь
     ax = axes[1, 1]
-    cal_dates = [d for d in calendar_df["date"]]
-    cal_scores = list(calendar_df["score"])
-    colors = ["#FF6B6B" if s >= 3 else "#FFC107" if s >= 2 else "#4ECDC4" for s in cal_scores]
-    ax.bar(cal_dates, cal_scores, color=colors, edgecolor="none", width=1.0)
-    ax.axhline(y=3, color="red", linestyle="--", alpha=0.5, label="Порог ≥3")
-    ax.axhline(y=2, color="orange", linestyle="--", alpha=0.3, label="Порог ≥2")
+    colors = ["#FF6B6B" if s >= hot_threshold else "#FFC107" if s >= warm_threshold else "#4ECDC4" for s in calendar_df["score"]]
+    ax.bar(calendar_df["date"], calendar_df["score"], color=colors, edgecolor="none", width=1.0)
+    ax.axhline(y=hot_threshold, color="red", linestyle="--", alpha=0.5)
+    ax.axhline(y=warm_threshold, color="orange", linestyle="--", alpha=0.3)
     ax.set_xlabel("Дата")
-    ax.set_ylabel("Астро-скор")
+    ax.set_ylabel("Reversal score")
     ax.set_title("Астро-календарь (красный = зоны риска)", fontweight="bold")
-    ax.legend(fontsize=8)
     ax.xaxis.set_major_locator(mdates.MonthLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
-    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
-    plt.suptitle("BTC Астро-скоринг — Модель + Календарь",
-                 fontsize=16, fontweight="bold", y=1.01)
+    plt.suptitle("BTC Астро-скоринг — Reversal/Direction модели + Календарь", fontsize=16, fontweight="bold", y=1.01)
     plt.tight_layout()
     plt.savefig("astro_scoring_results.png", dpi=150, bbox_inches="tight")
     print("\nГрафик: astro_scoring_results.png")
     plt.close()
 
 
-# ============================================================
-# СОХРАНЕНИЕ В БД
-# ============================================================
-
 def save_calendar_to_db(calendar_df):
     conn = sqlite3.connect(DB_PATH)
     rows = []
     for _, row in calendar_df.iterrows():
-        rows.append({
-            "date": row["date"].strftime("%Y-%m-%d"),
-            "score": row["score"],
-            "direction": row["direction"],
-            "moon_sign": row["moon_sign"],
-            "moon_element": row["moon_element"],
-            "quarter": row["quarter"],
-            "eclipse_days": row["eclipse_days"],
-            "moon_ingress": int(row["moon_ingress"]),
-            "tension": row["tension"],
-            "harmony": row["harmony"],
-            "retro_planets": ",".join(row["retro_planets"]),
-            "station_planets": ",".join(row["station_planets"]),
-            "details": " | ".join(row["details"]),
-        })
-    df = pd.DataFrame(rows)
-    df.to_sql("btc_astro_calendar", conn, if_exists="replace", index=False)
-    print(f"Сохранено в btc_astro_calendar: {len(df)} строк")
+        rows.append(
+            {
+                "date": row["date"].strftime("%Y-%m-%d"),
+                "score": row["score"],
+                "direction": row["direction"],
+                "reversal_score": row["reversal_score"],
+                "direction_score": row["direction_score"],
+                "moon_sign": row["moon_sign"],
+                "moon_element": row["moon_element"],
+                "quarter": row["quarter"],
+                "eclipse_days": row["eclipse_days"],
+                "days_to_eclipse": row["days_to_eclipse"],
+                "moon_ingress": int(row["moon_ingress"]),
+                "station_strength": row["station_strength"],
+                "moon_age_sin": row["moon_age_sin"],
+                "moon_age_cos": row["moon_age_cos"],
+                "tension": row["tension"],
+                "harmony": row["harmony"],
+                "retro_planets": ",".join(row["retro_planets"]),
+                "station_planets": ",".join(row["station_planets"]),
+                "details": " | ".join(row["details"]),
+            }
+        )
+    pd.DataFrame(rows).to_sql("btc_astro_calendar", conn, if_exists="replace", index=False)
+    print(f"Сохранено в btc_astro_calendar: {len(rows)} строк")
     conn.close()
 
 
@@ -713,60 +895,60 @@ def save_history_to_db(history_df):
     conn = sqlite3.connect(DB_PATH)
     rows = []
     for _, row in history_df.iterrows():
-        rows.append({
-            "date": row["date"].strftime("%Y-%m-%d"),
-            "close": row["close"],
-            "score": row["score"],
-            "direction": row["direction"],
-            "moon_sign": row["moon_sign"],
-            "moon_element": row["moon_element"],
-            "quarter": row["quarter"],
-            "eclipse_days": row["eclipse_days"],
-            "moon_ingress": int(row["moon_ingress"]),
-            "tension": row["tension"],
-            "harmony": row["harmony"],
-            "retro_planets": ",".join(row["retro_planets"]),
-            "station_planets": ",".join(row["station_planets"]),
-            "details": " | ".join(row["details"]),
-            "sample_split": row["sample_split"],
-            "is_pivot": int(row["is_pivot"]),
-        })
-
-    df = pd.DataFrame(rows)
-    df.to_sql("btc_astro_history", conn, if_exists="replace", index=False)
-    print(f"Сохранено в btc_astro_history: {len(df)} строк")
+        rows.append(
+            {
+                "date": row["date"].strftime("%Y-%m-%d"),
+                "close": row["close"],
+                "score": row["score"],
+                "direction": row["direction"],
+                "reversal_score": row["reversal_score"],
+                "direction_score": row["direction_score"],
+                "moon_sign": row["moon_sign"],
+                "moon_element": row["moon_element"],
+                "quarter": row["quarter"],
+                "eclipse_days": row["eclipse_days"],
+                "days_to_eclipse": row["days_to_eclipse"],
+                "moon_ingress": int(row["moon_ingress"]),
+                "station_strength": row["station_strength"],
+                "moon_age_sin": row["moon_age_sin"],
+                "moon_age_cos": row["moon_age_cos"],
+                "tension": row["tension"],
+                "harmony": row["harmony"],
+                "retro_planets": ",".join(row["retro_planets"]),
+                "station_planets": ",".join(row["station_planets"]),
+                "details": " | ".join(row["details"]),
+                "sample_split": row["sample_split"],
+                "is_pivot": int(row["is_pivot"]),
+            }
+        )
+    pd.DataFrame(rows).to_sql("btc_astro_history", conn, if_exists="replace", index=False)
+    print(f"Сохранено в btc_astro_history: {len(rows)} строк")
     conn.close()
 
 
 def main():
-    # 1. Валидация на истории
-    history_df, pdf, base_arr, _ = validate_model()
+    history_eval_df, pdf, base_arr, _, full_model, eval_thresholds, history_full_df, full_thresholds = validate_model()
 
-    # 2. Календарь до конца 2028
     today = datetime.combine(today_local_date(), datetime.min.time())
     end_date = datetime(2028, 12, 31)
-    calendar_df = generate_calendar(today, end_date)
+    calendar_df = generate_calendar(today, end_date, full_model, full_thresholds)
 
-    # 3. Визуализация
-    plot_results(pdf, base_arr, calendar_df)
-
-    # 4. Сохранение
-    save_history_to_db(history_df)
+    plot_results(pdf, base_arr, calendar_df, eval_thresholds)
+    save_history_to_db(history_full_df)
     save_calendar_to_db(calendar_df)
 
-    # 5. Ближайшие горячие зоны
+    hot_threshold = full_thresholds[min(2, len(full_thresholds) - 1)]
     print(f"\n\n{'=' * 90}")
     print("БЛИЖАЙШИЕ ЗОНЫ РИСКА РАЗВОРОТА")
     print("=" * 90)
-
-    hot = calendar_df[calendar_df["score"] >= 3].head(15)
+    hot = calendar_df[calendar_df["score"] >= hot_threshold].head(15)
     for _, row in hot.iterrows():
         dir_str = "↑ ПИК" if row["direction"] > 0 else "↓ ДНО" if row["direction"] < 0 else "  ?"
         days_away = (row["date"] - today).days
         print(f"\n  {row['date'].strftime('%Y-%m-%d')} (через {days_away}д)  СКОР: {row['score']:.1f}  {dir_str}")
         print(f"    {row['quarter']} | Луна в {row['moon_sign']} ({row['moon_element']})")
-        for d in row["details"]:
-            print(f"    {d}")
+        for detail in row["details"]:
+            print(f"    {detail}")
 
 
 if __name__ == "__main__":
