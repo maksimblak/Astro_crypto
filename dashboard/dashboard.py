@@ -27,11 +27,15 @@ def index():
 @app.route("/api/calendar")
 def api_calendar():
     conn = get_db()
-    rows = conn.execute(
-        "SELECT date, score, direction, moon_sign, moon_element, quarter, "
-        "eclipse_days, moon_ingress, tension, harmony, retro_planets, "
-        "station_planets, details FROM btc_astro_calendar ORDER BY date"
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            "SELECT date, score, direction, moon_sign, moon_element, quarter, "
+            "eclipse_days, moon_ingress, tension, harmony, retro_planets, "
+            "station_planets, details FROM btc_astro_calendar ORDER BY date"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        conn.close()
+        return jsonify({"error": "Table btc_astro_calendar not found. Run astro_scoring.py first."}), 404
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -39,11 +43,15 @@ def api_calendar():
 @app.route("/api/pivots")
 def api_pivots():
     conn = get_db()
-    rows = conn.execute(
-        "SELECT date, price, pivot_type, pct_change, is_high, is_major, "
-        "moon_quarter, moon_sign, moon_element, retro_count, tension_count, "
-        "harmony_count, eclipse_days FROM btc_pivot_astro_v2 ORDER BY date"
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            "SELECT date, price, pivot_type, pct_change, is_high, is_major, "
+            "moon_quarter, moon_sign, moon_element, retro_count, tension_count, "
+            "harmony_count, eclipse_days FROM btc_pivot_astro_v2 ORDER BY date"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        conn.close()
+        return jsonify({"error": "Table btc_pivot_astro_v2 not found. Run astro_extended_analysis.py first."}), 404
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -61,12 +69,16 @@ def api_daily():
 @app.route("/api/today")
 def api_today():
     conn = get_db()
-    row = conn.execute(
-        "SELECT date, score, direction, moon_sign, moon_element, quarter, "
-        "eclipse_days, moon_ingress, tension, harmony, retro_planets, "
-        "station_planets, details FROM btc_astro_calendar "
-        "ORDER BY ABS(julianday(date) - julianday('now')) LIMIT 1"
-    ).fetchone()
+    try:
+        row = conn.execute(
+            "SELECT date, score, direction, moon_sign, moon_element, quarter, "
+            "eclipse_days, moon_ingress, tension, harmony, retro_planets, "
+            "station_planets, details FROM btc_astro_calendar "
+            "ORDER BY ABS(julianday(date) - julianday('now')) LIMIT 1"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        conn.close()
+        return jsonify({"error": "Calendar not generated yet."}), 404
     conn.close()
     if row:
         return jsonify(dict(row))
@@ -108,12 +120,6 @@ def api_stats():
         pivots_above = conn.execute(
             "SELECT COUNT(*) as c FROM btc_pivots p "
             "JOIN btc_astro_calendar c ON c.date = p.date WHERE c.score >= ?", (t,)
-        ).fetchone()["c"]
-
-        # Also check pivots from btc_pivot_astro_v2 with retro_count + tension_count as proxy score
-        pivot_v2_above = conn.execute(
-            "SELECT COUNT(*) as c FROM btc_pivot_astro_v2 "
-            "WHERE (retro_count + tension_count + eclipse_days) >= ?", (t,)
         ).fetchone()["c"]
 
         pct_days = round(cal_above / total_cal * 100, 1) if total_cal else 0

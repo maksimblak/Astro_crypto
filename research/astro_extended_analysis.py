@@ -1,10 +1,10 @@
-import os
 """
 BTC x Астрология: Расширенный анализ V2
 Новые факторы: Лунные узлы (Раху/Кету), Void of Course Moon,
 Ингрессии планет, Плутон, Уран, Нептун.
 Глубокий комбинаторный поиск корреляций.
 """
+import os
 
 import sqlite3
 import ephem
@@ -58,7 +58,7 @@ MODALITY_MAP = {
 
 
 def get_zodiac_sign(lon_deg):
-    return ZODIAC_SIGNS[int(lon_deg / 30) % 12]
+    return ZODIAC_SIGNS[int(lon_deg % 360 / 30)]
 
 
 def _get_ecliptic_lon(body):

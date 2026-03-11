@@ -1,10 +1,10 @@
-import os
 """
 BTC Астро-скоринг: модель вероятности разворота.
 Строит балл для любой даты на основе найденных корреляций.
 Проверяет на исторических данных + генерирует календарь.
 """
 
+import os
 import sqlite3
 import ephem
 import math
@@ -58,7 +58,7 @@ ECLIPSE_DATES = [datetime.strptime(e[0], "%Y-%m-%d") for e in ECLIPSES]
 # ============================================================
 
 def get_zodiac_sign(lon_deg):
-    return ZODIAC_SIGNS[int(lon_deg / 30) % 12]
+    return ZODIAC_SIGNS[int(lon_deg % 360 / 30)]
 
 def _get_ecliptic_lon(body):
     return float(ephem.Ecliptic(body).lon) * 180 / math.pi
@@ -386,7 +386,7 @@ def validate_model():
 
     # Пороги
     print(f"\n  --- Эффективность порогов ---")
-    print(f"  {'Порог':>8} {'Разворотов':>12} {'% от 93':>8} {'Base%':>8} {'Lift':>8} {'Precision':>10}")
+    print(f"  {'Порог':>8} {'Разворотов':>12} {'% от '+str(len(pdf)):>8} {'Base%':>8} {'Lift':>8} {'Precision':>10}")
 
     for threshold in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]:
         p_above = (pdf["score"] >= threshold).sum()
@@ -398,12 +398,13 @@ def validate_model():
         else:
             lift = float("inf") if p_above > 0 else 0
 
-        # Precision: какой % дней с score >= threshold реально развороты?
-        total_days_above = (base_arr >= threshold).sum()
-        if total_days_above > 0:
-            precision = p_above / (p_above + total_days_above) * 100
+        # Precision: какой % дней с высоким скором реально развороты?
+        # baseline выборка = каждый 3-й день, пересчитываем на полную
+        total_days_above_est = int((base_arr >= threshold).sum() * 3)
+        if total_days_above_est + p_above > 0:
+            precision = p_above / (p_above + total_days_above_est) * 100
         else:
-            precision = 100.0 if p_above > 0 else 0
+            precision = 0
 
         print(f"  {threshold:>6.0f}+ {p_above:>6}/{len(pdf):>3} {p_pct:>6.1f}% {b_above:>6.1f}% "
               f"{lift:>7.2f}x {precision:>8.1f}%")
@@ -622,7 +623,7 @@ def main():
     pdf, base_arr = validate_model()
 
     # 2. Календарь на ближайшие 6 месяцев
-    today = datetime(2026, 3, 11)
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     calendar_df = generate_calendar(today, today + timedelta(days=180))
 
     # 3. Визуализация

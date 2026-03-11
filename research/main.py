@@ -1,10 +1,10 @@
-import os
 """
 BTC Research: Пики и Дно 2016-2026
 Zigzag-алгоритм для поиска разворотов с порогами 10% (локальные) и 20% (крупные).
 Данные сохраняются в SQLite (btc_research.db) и CSV.
 """
 
+import os
 import sqlite3
 import yfinance as yf
 import pandas as pd

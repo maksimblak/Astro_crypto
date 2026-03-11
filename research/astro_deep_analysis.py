@@ -1,9 +1,9 @@
-import os
 """
 BTC x Астрология: Глубокий анализ корреляций
 Ищем комбинации факторов, раздельные паттерны пиков/дно,
 окно ±3 дня, повторяющиеся астро-сигнатуры.
 """
+import os
 
 import sqlite3
 import ephem
@@ -46,7 +46,7 @@ ECLIPSE_DATES = [datetime.strptime(e[0], "%Y-%m-%d") for e in ECLIPSES]
 # ============================================================
 
 def get_zodiac_sign(lon_deg):
-    return ZODIAC_SIGNS[int(lon_deg / 30) % 12]
+    return ZODIAC_SIGNS[int(lon_deg % 360 / 30)]
 
 def _is_retrograde(planet_class, d_now, d_prev):
     body_now = planet_class(d_now)
@@ -340,7 +340,7 @@ def analyze_combinations(pdf, bdf):
     print(f"{'Комбинация':<40} {'При разв.':>10} {'Base%':>8} {'Ratio':>7} {'p-value':>10}")
     print("-" * 80)
     for r in results[:25]:
-        sig = " *" if r["p_value"] < 0.05 else " **" if r["p_value"] < 0.01 else ""
+        sig = " **" if r["p_value"] < 0.01 else " *" if r["p_value"] < 0.05 else ""
         print(f"{r['combo']:<40} {r['pivots']:>4} ({r['pivot_pct']:>4.1f}%) {r['base_pct']:>6.1f}% "
               f"{r['ratio']:>6.2f}x {r['p_value']:>10.4f}{sig}")
 
