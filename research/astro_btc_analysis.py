@@ -1,3 +1,4 @@
+import os
 """
 BTC x Астрология: Корреляционный анализ 2020-2026
 Проверяем влияние астрологических факторов на цену биткоина.
@@ -22,7 +23,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-DB_PATH = "btc_research.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.db")
 START_DATE = "2020-01-01"
 END_DATE = "2026-03-12"
 

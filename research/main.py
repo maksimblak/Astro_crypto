@@ -1,3 +1,4 @@
+import os
 """
 BTC Research: Пики и Дно 2016-2026
 Zigzag-алгоритм для поиска разворотов с порогами 10% (локальные) и 20% (крупные).
@@ -12,7 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-DB_PATH = "btc_research.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.db")
 
 
 def init_db():
@@ -298,7 +299,7 @@ def print_db_examples(conn: sqlite3.Connection):
             print(f"  {'  |  '.join(str(v) for v in row)}")
 
 
-def plot_chart(prices: pd.Series, df: pd.DataFrame, save_path: str = "btc_chart.png"):
+def plot_chart(prices: pd.Series, df: pd.DataFrame, save_path: str = os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts"), "btc_chart.png")):
     """Строит график BTC с отмеченными пиками и дно."""
     fig, ax = plt.subplots(figsize=(24, 12))
 
@@ -365,7 +366,7 @@ def main():
     # 5. Сохраняем в БД и CSV
     save_pivots_to_db(conn, df)
 
-    csv_path = "btc_peaks_valleys.csv"
+    csv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_peaks_valleys.csv")
     df_csv = df.copy()
     df_csv["date"] = df_csv["date"].dt.strftime("%Y-%m-%d")
     df_csv.to_csv(csv_path, index=False)
@@ -375,7 +376,7 @@ def main():
     print_results(df)
 
     # 7. График
-    plot_chart(prices, df, "btc_chart.png")
+    plot_chart(prices, df, os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "charts"), "btc_chart.png"))
 
     # 8. Примеры запросов к БД
     print_db_examples(conn)

@@ -9,7 +9,8 @@ import os
 from flask import Flask, jsonify, render_template
 
 app = Flask(__name__)
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "btc_research.db")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(BASE_DIR, "data", "btc_research.db")
 
 
 def get_db():

@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Astro BTC — Reversal Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg-main: #0a0e17;
+    --bg-card: #111827;
+    --bg-card2: #1a2235;
+    --bg-hover: #1f2a40;
+    --border: rgba(255,255,255,0.06);
+    --border-glow: rgba(0,212,255,0.15);
+    --text: #e8eaed;
+    --text2: #6b7280;
+    --text3: #4b5563;
+    --neon-cyan: #00d4ff;
+    --neon-blue: #3b82f6;
+    --neon-purple: #8b5cf6;
+    --neon-pink: #ec4899;
+    --bull: #00ff88;
+    --bull-dim: rgba(0,255,136,0.15);
+    --bear: #ff3b5c;
+    --bear-dim: rgba(255,59,92,0.15);
+    --warn: #f59e0b;
+    --warn-dim: rgba(245,158,11,0.12);
+    --hot: #ff6b35;
+    --glow-cyan: 0 0 20px rgba(0,212,255,0.3);
+    --glow-green: 0 0 20px rgba(0,255,136,0.3);
+    --glow-red: 0 0 20px rgba(255,59,92,0.3);
+    --radius: 16px;
+    --radius-sm: 10px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg-main);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* === Animated background === */
+  body::before {
+    content: '';
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background:
+      radial-gradient(ellipse at 20% 50%, rgba(59,130,246,0.06) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba(139,92,246,0.05) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 80%, rgba(0,212,255,0.04) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container { max-width: 1480px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+  /* === Top Nav === */
+  .topbar {
+    background: rgba(17,24,39,0.85);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .topbar-inner {
+    max-width: 1480px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 64px;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+    font-weight: 800; font-size: 20px; letter-spacing: -0.5px;
+  }
+  .logo-icon {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--neon-cyan), var(--neon-purple));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; box-shadow: var(--glow-cyan);
+  }
+  .logo span { color: var(--neon-cyan); }
+  .nav-pills { display: flex; gap: 4px; }
+  .nav-pill {
+    padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    color: var(--text2); cursor: pointer; transition: all 0.2s;
+    border: none; background: none;
+  }
+  .nav-pill:hover { color: var(--text); background: var(--bg-hover); }
+  .nav-pill.active { color: var(--neon-cyan); background: rgba(0,212,255,0.1); }
+
+  /* === Hero Score Strip === */
+  .hero {
+    padding: 28px 0 20px;
+    display: flex; gap: 16px; flex-wrap: wrap; align-items: stretch;
+  }
+  .hero-main {
+    flex: 0 0 280px;
+    background: linear-gradient(135deg, rgba(0,212,255,0.08), rgba(139,92,246,0.08));
+    border: 1px solid var(--border-glow);
+    border-radius: var(--radius);
+    padding: 24px 28px;
+    position: relative; overflow: hidden;
+  }
+  .hero-main::after {
+    content: ''; position: absolute; top: -50%; right: -30%;
+    width: 200px; height: 200px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(0,212,255,0.08), transparent 70%);
+    pointer-events: none;
+  }
+  .hero-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text2); font-weight: 600; }
+  .hero-score {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 56px; font-weight: 700; line-height: 1;
+    margin: 6px 0 4px;
+  }
+  .hero-score.hot { color: var(--bear); text-shadow: var(--glow-red); }
+  .hero-score.warm { color: var(--warn); }
+  .hero-score.cool { color: var(--neon-cyan); text-shadow: var(--glow-cyan); }
+  .hero-score.cold { color: var(--text3); }
+  .hero-sub { font-size: 13px; color: var(--text2); }
+
+  .hero-cards { flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .hero-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px 18px;
+    transition: border-color 0.2s;
+  }
+  .hero-card:hover { border-color: var(--border-glow); }
+  .hero-card .hc-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text2); font-weight: 600; }
+  .hero-card .hc-val { font-size: 20px; font-weight: 700; margin-top: 4px; }
+  .hero-card .hc-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+  .dir-up { color: var(--bear); }
+  .dir-down { color: var(--bull); }
+  .dir-neutral { color: var(--text2); }
+
+  /* === Section / Cards === */
+  .section { margin-top: 28px; }
+  .section-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px; flex-wrap: wrap; gap: 12px;
+  }
+  .section-title {
+    font-size: 16px; font-weight: 700; letter-spacing: -0.3px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .section-title .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--neon-cyan); box-shadow: var(--glow-cyan);
+  }
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: rgba(255,255,255,0.1); }
+
+  /* === Filters === */
+  .pill-group { display: flex; gap: 4px; flex-wrap: wrap; }
+  .pill {
+    padding: 5px 14px; border-radius: 8px; font-size: 12px; font-weight: 500;
+    color: var(--text2); cursor: pointer; border: 1px solid var(--border);
+    background: transparent; transition: all 0.2s;
+  }
+  .pill:hover { color: var(--text); border-color: rgba(255,255,255,0.15); background: var(--bg-hover); }
+  .pill.active {
+    color: var(--neon-cyan); border-color: var(--neon-cyan);
+    background: rgba(0,212,255,0.08); box-shadow: inset 0 0 12px rgba(0,212,255,0.06);
+  }
+
+  /* === Chart === */
+  .chart-box { position: relative; height: 380px; margin-top: 12px; }
+  .chart-box-lg { height: 440px; }
+
+  /* === Risk Grid === */
+  .risk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
+  .risk-item {
+    background: var(--bg-card2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 18px;
+    display: flex; gap: 14px; align-items: flex-start;
+    transition: all 0.2s; cursor: default;
+  }
+  .risk-item:hover { border-color: rgba(255,255,255,0.12); transform: translateY(-1px); }
+  .risk-item.hot { border-left: 3px solid var(--bear); }
+  .risk-item.warm { border-left: 3px solid var(--warn); }
+  .risk-item.mild { border-left: 3px solid var(--neon-cyan); }
+
+  .risk-badge {
+    width: 52px; height: 52px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700; font-size: 20px; flex-shrink: 0;
+  }
+  .risk-badge.hot { background: var(--bear-dim); color: var(--bear); }
+  .risk-badge.warm { background: var(--warn-dim); color: var(--warn); }
+  .risk-badge.mild { background: rgba(0,212,255,0.1); color: var(--neon-cyan); }
+
+  .risk-body { flex: 1; min-width: 0; }
+  .risk-date { font-weight: 600; font-size: 14px; }
+  .risk-date .days-away { color: var(--text2); font-weight: 400; font-size: 12px; margin-left: 6px; }
+  .risk-dir { font-size: 13px; margin-top: 2px; }
+  .risk-dir .up { color: var(--bear); }
+  .risk-dir .down { color: var(--bull); }
+  .risk-meta { font-size: 12px; color: var(--text2); margin-top: 4px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .risk-meta .tag {
+    background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    border-radius: 6px; padding: 2px 8px; font-size: 11px;
+  }
+  .risk-details { font-size: 11px; color: var(--text3); margin-top: 6px; line-height: 1.5; }
+
+  /* === Stats === */
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat-block {
+    background: var(--bg-card2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 20px; text-align: center;
+  }
+  .stat-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 32px; font-weight: 700; color: var(--neon-cyan);
+  }
+  .stat-val.accent-green { color: var(--bull); }
+  .stat-val.accent-yellow { color: var(--warn); }
+  .stat-label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.8px; margin-top: 4px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+  thead th {
+    text-align: left; color: var(--text2); font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.8px;
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+  }
+  tbody td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  tbody tr:hover td { background: rgba(255,255,255,0.02); }
+  .lift-good { color: var(--bull); font-weight: 700; }
+  .lift-ok { color: var(--warn); font-weight: 600; }
+  .lift-meh { color: var(--text2); }
+
+  /* === Footer === */
+  .footer {
+    text-align: center; padding: 40px 0 24px;
+    font-size: 12px; color: var(--text3);
+  }
+  .footer a { color: var(--neon-cyan); text-decoration: none; }
+
+  /* === Loading === */
+  .loading {
+    text-align: center; padding: 60px; color: var(--text2); font-size: 14px;
+  }
+  .loading::after {
+    content: '';
+    display: inline-block; width: 20px; height: 20px; margin-left: 8px;
+    border: 2px solid var(--text3); border-top-color: var(--neon-cyan);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* === Pulse animation for live dot === */
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.5); }
+  }
+  .live-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--bull);
+    display: inline-block; animation: pulse 2s ease infinite;
+  }
+
+  /* === Responsive === */
+  @media (max-width: 768px) {
+    .hero { flex-direction: column; }
+    .hero-main { flex: none; }
+    .hero-cards { grid-template-columns: repeat(2, 1fr); }
+    .chart-box, .chart-box-lg { height: 300px; }
+    .risk-grid { grid-template-columns: 1fr; }
+    .topbar-inner { height: auto; padding: 12px 0; flex-wrap: wrap; gap: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="logo">
+      <div class="logo-icon">&#9790;</div>
+      <div>Astro<span>BTC</span></div>
+    </div>
+    <div class="nav-pills">
+      <button class="nav-pill active" onclick="scrollTo('#sectionCalendar')">Calendar</button>
+      <button class="nav-pill" onclick="scrollTo('#sectionChart')">Chart</button>
+      <button class="nav-pill" onclick="scrollTo('#sectionRisk')">Risk Zones</button>
+      <button class="nav-pill" onclick="scrollTo('#sectionStats')">Stats</button>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Hero strip -->
+  <div class="hero" id="heroBlock">
+    <div class="hero-main">
+      <div class="hero-label"><span class="live-dot"></span> Today's Reversal Score</div>
+      <div class="hero-score cold" id="heroScore">—</div>
+      <div class="hero-sub" id="heroSub">Loading...</div>
+    </div>
+    <div class="hero-cards" id="heroCards"></div>
+  </div>
+
+  <!-- Calendar -->
+  <div class="section" id="sectionCalendar">
+    <div class="section-head">
+      <div class="section-title"><span class="dot"></span> Astro Calendar</div>
+      <div class="pill-group" id="monthFilters"></div>
+    </div>
+    <div class="card">
+      <div class="chart-box chart-box-lg"><canvas id="calendarChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Price chart -->
+  <div class="section" id="sectionChart">
+    <div class="section-head">
+      <div class="section-title"><span class="dot" style="background:var(--neon-blue);box-shadow:0 0 20px rgba(59,130,246,0.3)"></span> BTC Price &amp; Pivots</div>
+    </div>
+    <div class="card">
+      <div class="chart-box chart-box-lg"><canvas id="priceChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Risk zones -->
+  <div class="section" id="sectionRisk">
+    <div class="section-head">
+      <div class="section-title"><span class="dot" style="background:var(--bear);box-shadow:var(--glow-red)"></span> Upcoming Risk Zones</div>
+    </div>
+    <div class="risk-grid" id="riskGrid">
+      <div class="loading">Scanning astro events</div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="section" id="sectionStats">
+    <div class="section-head">
+      <div class="section-title"><span class="dot" style="background:var(--neon-purple);box-shadow:0 0 20px rgba(139,92,246,0.3)"></span> Model Performance</div>
+    </div>
+    <div class="card" id="statsBlock">
+      <div class="loading">Crunching numbers</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    AstroBTC Reversal Scanner &middot; Data-driven astro research &middot;
+    <a href="https://github.com/maksimblak/Astro_crypto" target="_blank">GitHub</a>
+  </div>
+</div>
+
+<script>
+const MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MO_RU = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+
+function fmtDate(d) {
+  const dt = new Date(d);
+  return dt.getDate() + ' ' + MO_RU[dt.getMonth()] + ' ' + dt.getFullYear();
+}
+function fmtShort(d) {
+  const dt = new Date(d);
+  return dt.getDate() + ' ' + MO_RU[dt.getMonth()];
+}
+function scrollTo(sel) {
+  document.querySelector(sel)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function scoreClass(s) {
+  if (s >= 5) return 'hot';
+  if (s >= 3) return 'warm';
+  if (s >= 2) return 'cool';
+  return 'cold';
+}
+function scoreBarColor(s) {
+  if (s >= 6) return 'rgba(255,59,92,0.9)';
+  if (s >= 4) return 'rgba(255,107,53,0.85)';
+  if (s >= 3) return 'rgba(245,158,11,0.8)';
+  if (s >= 2) return 'rgba(0,212,255,0.6)';
+  return 'rgba(75,85,99,0.4)';
+}
+function scoreBarBorder(s) {
+  if (s >= 6) return '#ff3b5c';
+  if (s >= 4) return '#ff6b35';
+  if (s >= 3) return '#f59e0b';
+  if (s >= 2) return '#00d4ff';
+  return '#4b5563';
+}
+
+let calendarData = [], calChart = null;
+
+async function init() {
+  const [todayR, calR, dailyR, pivotsR, statsR] = await Promise.all([
+    fetch('/api/today'), fetch('/api/calendar'), fetch('/api/daily'),
+    fetch('/api/pivots'), fetch('/api/stats')
+  ]);
+  const today = await todayR.json();
+  calendarData = await calR.json();
+  const daily = await dailyR.json();
+  const pivots = await pivotsR.json();
+  const stats = await statsR.json();
+
+  buildHero(today);
+  buildCalendar(calendarData);
+  buildPrice(daily, pivots);
+  buildRisk(calendarData);
+  buildStats(stats);
+}
+
+function buildHero(t) {
+  if (!t.date) return;
+  const sc = t.score || 0;
+  const el = document.getElementById('heroScore');
+  el.textContent = sc.toFixed(1);
+  el.className = 'hero-score ' + scoreClass(sc);
+
+  const dirText = t.direction > 0 ? '&#9650; Peak bias' : t.direction < 0 ? '&#9660; Bottom bias' : '&#9644; Neutral';
+  document.getElementById('heroSub').innerHTML = `${fmtDate(t.date)} &middot; ${dirText}`;
+
+  const details = (t.details || '').split(' | ').filter(Boolean);
+  document.getElementById('heroCards').innerHTML = `
+    <div class="hero-card">
+      <div class="hc-label">Direction</div>
+      <div class="hc-val ${t.direction > 0 ? 'dir-up' : t.direction < 0 ? 'dir-down' : 'dir-neutral'}">
+        ${t.direction > 0 ? '&#9650; Peak' : t.direction < 0 ? '&#9660; Bottom' : '&#9644; Neutral'}
+      </div>
+    </div>
+    <div class="hero-card">
+      <div class="hc-label">Moon Sign</div>
+      <div class="hc-val">${t.moon_sign || '—'}</div>
+      <div class="hc-sub">${t.moon_element || ''}</div>
+    </div>
+    <div class="hero-card">
+      <div class="hc-label">Phase</div>
+      <div class="hc-val" style="font-size:16px">${t.quarter || '—'}</div>
+    </div>
+    <div class="hero-card">
+      <div class="hc-label">Tension / Harmony</div>
+      <div class="hc-val" style="font-size:18px">${t.tension || 0} / ${t.harmony || 0}</div>
+    </div>
+    <div class="hero-card">
+      <div class="hc-label">Eclipse</div>
+      <div class="hc-val" style="font-size:18px">${t.eclipse_days}d</div>
+      <div class="hc-sub">${t.eclipse_days <= 7 ? 'Near eclipse!' : 'No eclipse nearby'}</div>
+    </div>
+    <div class="hero-card">
+      <div class="hc-label">Retro Planets</div>
+      <div class="hc-val" style="font-size:14px">${t.retro_planets || 'None'}</div>
+      ${t.station_planets ? '<div class="hc-sub">Station: '+t.station_planets+'</div>' : ''}
+    </div>
+  `;
+}
+
+function buildCalendar(data, filterMonth) {
+  let filtered = filterMonth ? data.filter(d => d.date.substring(0,7) === filterMonth) : data;
+
+  const months = [...new Set(data.map(d => d.date.substring(0,7)))].sort();
+  const box = document.getElementById('monthFilters');
+  box.innerHTML = `<button class="pill ${!filterMonth?'active':''}" onclick="buildCalendar(calendarData)">All</button>`;
+  months.forEach(m => {
+    const dt = new Date(m + '-01');
+    const lbl = MO_RU[dt.getMonth()] + ' ' + dt.getFullYear();
+    box.innerHTML += `<button class="pill ${filterMonth===m?'active':''}" onclick="buildCalendar(calendarData,'${m}')">${lbl}</button>`;
+  });
+
+  const labels = filtered.map(d => fmtShort(d.date));
+  const scores = filtered.map(d => d.score);
+
+  if (calChart) calChart.destroy();
+
+  calChart = new Chart(document.getElementById('calendarChart').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: scores,
+        backgroundColor: scores.map(s => scoreBarColor(s)),
+        borderColor: scores.map(s => scoreBarBorder(s)),
+        borderWidth: 1, borderRadius: 4, borderSkipped: false,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(17,24,39,0.95)',
+          borderColor: 'rgba(0,212,255,0.2)', borderWidth: 1,
+          titleColor: '#e8eaed', bodyColor: '#9ca3af',
+          titleFont: { size: 13, weight: 600 },
+          bodyFont: { size: 12, family: 'JetBrains Mono' },
+          padding: 14, cornerRadius: 10,
+          callbacks: {
+            title: (items) => fmtDate(filtered[items[0].dataIndex].date),
+            afterTitle: (items) => {
+              const d = filtered[items[0].dataIndex];
+              return `${d.quarter} | ${d.moon_sign} (${d.moon_element})`;
+            },
+            label: (item) => `Score: ${item.raw.toFixed(1)}`,
+            afterBody: (items) => {
+              const d = filtered[items[0].dataIndex];
+              if (!d.details) return '';
+              return '\n' + d.details.split(' | ').join('\n');
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#4b5563', maxRotation: 90, font: { size: filtered.length > 60 ? 7 : 10 } },
+          grid: { display: false }
+        },
+        y: {
+          ticks: { color: '#4b5563', font: { family: 'JetBrains Mono', size: 11 } },
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          beginAtZero: true,
+        }
+      }
+    }
+  });
+}
+
+function buildPrice(daily, pivots) {
+  const highs = pivots.filter(p => p.is_high === 1);
+  const lows = pivots.filter(p => p.is_high === 0);
+
+  function pts(arr) {
+    return arr.map(p => ({ x: p.date, y: p.price, r: Math.max(4, Math.min(12, (p.tension_count||0)*1.5 + (p.near_eclipse||0)*3)) }));
+  }
+
+  new Chart(document.getElementById('priceChart').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: daily.map(d => d.date),
+      datasets: [
+        {
+          label: 'BTC',
+          data: daily.map(d => d.close),
+          borderColor: 'rgba(59,130,246,0.8)',
+          backgroundColor: ctx => {
+            const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
+            g.addColorStop(0, 'rgba(59,130,246,0.15)');
+            g.addColorStop(1, 'rgba(59,130,246,0)');
+            return g;
+          },
+          borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.1, order: 2,
+        },
+        {
+          label: 'Peaks', type: 'bubble', data: pts(highs),
+          backgroundColor: 'rgba(255,59,92,0.6)', borderColor: '#ff3b5c', borderWidth: 1.5, order: 1,
+        },
+        {
+          label: 'Bottoms', type: 'bubble', data: pts(lows),
+          backgroundColor: 'rgba(0,255,136,0.5)', borderColor: '#00ff88', borderWidth: 1.5, order: 1,
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#9ca3af', font: { size: 12 }, usePointStyle: true, pointStyle: 'circle' }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(17,24,39,0.95)',
+          borderColor: 'rgba(59,130,246,0.2)', borderWidth: 1,
+          titleColor: '#e8eaed', bodyColor: '#9ca3af',
+          padding: 12, cornerRadius: 10,
+          callbacks: {
+            label: (ctx) => {
+              if (ctx.dataset.type === 'bubble') {
+                return `${ctx.dataset.label}: $${ctx.raw.y.toLocaleString()} (${ctx.raw.x})`;
+              }
+              return `BTC: $${ctx.parsed.y.toLocaleString()}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#4b5563', maxTicksLimit: 20,
+            callback: function(v) { const d = this.getLabelForValue(v); return d ? d.substring(0,7) : ''; }
+          },
+          grid: { display: false }
+        },
+        y: {
+          type: 'logarithmic',
+          ticks: { color: '#4b5563', font: { family: 'JetBrains Mono', size: 11 },
+            callback: v => '$' + (v>=1000 ? (v/1000).toFixed(0)+'k' : v)
+          },
+          grid: { color: 'rgba(255,255,255,0.04)' },
+        }
+      }
+    }
+  });
+}
+
+function buildRisk(calendar) {
+  const today = new Date().toISOString().substring(0,10);
+  const upcoming = calendar.filter(d => d.date >= today && d.score >= 3).slice(0, 24);
+  const grid = document.getElementById('riskGrid');
+
+  if (!upcoming.length) {
+    grid.innerHTML = '<div class="loading" style="animation:none">No high-score days in range</div>';
+    return;
+  }
+
+  const todayDate = new Date(today);
+  grid.innerHTML = upcoming.map(d => {
+    const cls = d.score >= 5 ? 'hot' : d.score >= 3 ? 'warm' : 'mild';
+    const daysAway = Math.round((new Date(d.date) - todayDate) / 86400000);
+    const details = (d.details || '').split(' | ').filter(s => s.startsWith('+'));
+    const dirHtml = d.direction > 0 ? '<span class="up">&#9650; Peak</span>'
+                  : d.direction < 0 ? '<span class="down">&#9660; Bottom</span>'
+                  : 'Neutral';
+
+    return `<div class="risk-item ${cls}">
+      <div class="risk-badge ${cls}">${d.score.toFixed(1)}</div>
+      <div class="risk-body">
+        <div class="risk-date">${fmtDate(d.date)} <span class="days-away">${daysAway === 0 ? 'Today' : 'in ' + daysAway + 'd'}</span></div>
+        <div class="risk-dir">${dirHtml}</div>
+        <div class="risk-meta">
+          <span class="tag">${d.moon_sign}</span>
+          <span class="tag">${d.moon_element}</span>
+          <span class="tag">${d.quarter}</span>
+          ${d.retro_planets ? '<span class="tag">Retro: '+d.retro_planets+'</span>' : ''}
+          ${d.station_planets ? '<span class="tag">Station: '+d.station_planets+'</span>' : ''}
+        </div>
+        <div class="risk-details">${details.join('<br>')}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function buildStats(s) {
+  const block = document.getElementById('statsBlock');
+
+  const thRows = s.thresholds.map(t => {
+    const cls = t.lift >= 2 ? 'lift-good' : t.lift >= 1.2 ? 'lift-ok' : 'lift-meh';
+    return `<tr>
+      <td style="font-family:'JetBrains Mono'">&ge; ${t.threshold}</td>
+      <td>${t.days_count} <span style="color:var(--text2)">(${t.days_pct}%)</span></td>
+      <td>${t.pivots_in_zone}</td>
+      <td class="${cls}">${t.lift}x</td>
+    </tr>`;
+  }).join('');
+
+  block.innerHTML = `
+    <div class="stats-row">
+      <div class="stat-block">
+        <div class="stat-val">${s.baseline_avg_score}</div>
+        <div class="stat-label">Avg Score (All Days)</div>
+      </div>
+      <div class="stat-block">
+        <div class="stat-val accent-green">${s.pivot_avg_score}</div>
+        <div class="stat-label">Avg Score (Pivots)</div>
+      </div>
+      <div class="stat-block">
+        <div class="stat-val accent-yellow">${s.total_pivots}</div>
+        <div class="stat-label">Historical Pivots</div>
+      </div>
+      <div class="stat-block">
+        <div class="stat-val">${s.direction_accuracy}%</div>
+        <div class="stat-label">Direction Accuracy</div>
+      </div>
+    </div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:8px;color:var(--text2)">Threshold Analysis</div>
+    <table>
+      <thead><tr><th>Threshold</th><th>Calendar Days</th><th>Pivots Caught</th><th>Lift</th></tr></thead>
+      <tbody>${thRows}</tbody>
+    </table>
+  `;
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+import os
 """
 BTC x Астрология: Анализ разворотных точек
 Какие астро-условия были в моменты каждого пика и дна?
@@ -16,7 +17,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-DB_PATH = "btc_research.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.db")
 
 ZODIAC_SIGNS = [
     "Овен", "Телец", "Близнецы", "Рак",
