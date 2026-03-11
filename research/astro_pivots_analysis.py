@@ -258,10 +258,10 @@ def main():
 
     pdf = pd.DataFrame(pivot_astro)
 
-    # Baseline: астро для всех дней (сэмплируем каждый 3-й для скорости)
-    print("Вычисление baseline астро-данных (каждый 3-й день)...")
+    # Baseline: астро для всех дней (random sample ~33% с фиксированным seed)
+    print("Вычисление baseline астро-данных (random sample ~33%)...")
     baseline_astro = []
-    sampled_days = all_days_df.iloc[::3]
+    sampled_days = all_days_df.sample(frac=1/3, random_state=42)
     for _, row in sampled_days.iterrows():
         date = row["date"].to_pydatetime()
         astro = get_astro_for_date(date)

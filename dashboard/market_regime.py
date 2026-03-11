@@ -108,12 +108,13 @@ def _stress_signal(label, value, note, points, available=True):
     }
 
 
-def _context_signal(label, value, note, tone, available=True):
+def _context_signal(label, value, note, tone, score=0, available=True):
     return {
         "label": label,
         "value": value,
         "note": note,
         "tone": tone if tone in {"bull", "bear", "neutral"} else "neutral",
+        "score": score,
         "category": "context",
         "available": available,
     }
@@ -176,13 +177,13 @@ def _stress_profile(stress_score):
 
 
 def _context_profile(context_score):
-    if context_score >= 3:
+    if context_score >= 4:
         return {
             "context_label": "External tailwind",
             "context_tone": "bull",
             "context_summary": "Внешний слой поддерживает режим: attention, derivatives и on-chain не спорят с ростом.",
         }
-    if context_score <= -3:
+    if context_score <= -4:
         return {
             "context_label": "External headwind",
             "context_tone": "bear",
@@ -468,110 +469,115 @@ def _build_stress_signals(metrics):
     ]
 
 
-def _build_context_signals(metrics, direction_score, stress_score):
+def _build_context_signals(metrics):
     wiki_z = metrics["wiki_views_z_30d"]
     if wiki_z is None:
-        wiki_tone = "neutral"
-    elif wiki_z >= 2.0:
-        wiki_tone = "bear"
+        wiki_score = 0
+    elif wiki_z >= 1.30:
+        wiki_score = 2
+    elif wiki_z <= -1.20:
+        wiki_score = -2
     else:
-        wiki_tone = "neutral"
+        wiki_score = 0
 
     fear_greed = metrics["fear_greed_value"]
     if fear_greed is None:
-        fear_tone = "neutral"
-    elif fear_greed >= 75:
-        fear_tone = "bear"
-    elif fear_greed <= 20 and stress_score >= 2:
-        fear_tone = "bull"
+        fear_score = 0
+    elif fear_greed >= 70:
+        fear_score = 3
+    elif fear_greed <= 24:
+        fear_score = -3
     else:
-        fear_tone = "neutral"
+        fear_score = 0
 
     funding_z = metrics["funding_rate_z_30d"]
     if funding_z is None:
-        funding_tone = "neutral"
-    elif funding_z >= 1.5:
-        funding_tone = "bear"
-    elif funding_z <= -1.5:
-        funding_tone = "bull"
+        funding_score = 0
+    elif funding_z >= 0.98:
+        funding_score = 1
+    elif funding_z <= -1.12:
+        funding_score = -1
     else:
-        funding_tone = "neutral"
+        funding_score = 0
 
     perp_premium = metrics["perp_premium_daily"]
-    perp_premium_z = metrics["perp_premium_z_30d"]
-    if perp_premium is None and perp_premium_z is None:
-        premium_tone = "neutral"
-    elif perp_premium is not None and perp_premium <= -0.001:
-        premium_tone = "bear"
-    elif perp_premium_z is not None and perp_premium_z >= 1.5:
-        premium_tone = "bear"
-    elif perp_premium is not None and perp_premium > 0.0005 and direction_score > 0:
-        premium_tone = "bull"
+    if perp_premium is None:
+        premium_score = 0
+    elif perp_premium >= 0.00019:
+        premium_score = 2
+    elif perp_premium <= -0.00026:
+        premium_score = -2
     else:
-        premium_tone = "neutral"
+        premium_score = 0
 
     oi_z = metrics["open_interest_z_30d"]
     if oi_z is None:
-        oi_tone = "neutral"
-    elif oi_z >= 1.5:
-        oi_tone = "bear"
-    elif oi_z <= -1.0 and stress_score >= 2:
-        oi_tone = "bull"
+        oi_score = 0
+    elif oi_z <= -1.48:
+        oi_score = 1
+    elif oi_z >= 0.42:
+        oi_score = -1
     else:
-        oi_tone = "neutral"
+        oi_score = 0
 
-    onchain_z = metrics["onchain_activity_z_30d"]
-    if onchain_z is None:
-        onchain_tone = "neutral"
-    elif onchain_z >= 1.0:
-        onchain_tone = "bull"
-    elif onchain_z <= -1.0:
-        onchain_tone = "bear"
+    active_addresses_z = metrics["unique_addresses_z_30d"]
+    if active_addresses_z is None:
+        addresses_score = 0
+    elif active_addresses_z >= 0.91:
+        addresses_score = 2
+    elif active_addresses_z <= -0.90:
+        addresses_score = -2
     else:
-        onchain_tone = "neutral"
+        addresses_score = 0
 
     return [
         _context_signal(
             "Wikipedia attention",
             _fmt_float(wiki_z),
-            "Сильный всплеск pageviews обычно означает crowd attention и поздний вход толпы, а не ранний edge.",
-            wiki_tone,
-            wiki_z is not None,
+            "По full-history backtest высокий Wikipedia attention у BTC работал лучше, чем низкий.",
+            _signal_tone(wiki_score),
+            score=wiki_score,
+            available=wiki_z is not None,
         ),
         _context_signal(
             "Fear & Greed",
             _fmt_index(fear_greed),
-            "Extreme greed добавляет перегрев. Extreme fear полезен только как washout-контекст, а не как самостоятельный long.",
-            fear_tone,
-            fear_greed is not None,
+            "На истории 2018-2026 высокий Fear & Greed оказался сильнее low-fear режима, поэтому он теперь весит больше.",
+            _signal_tone(fear_score),
+            score=fear_score,
+            available=fear_greed is not None,
         ),
         _context_signal(
-            "Funding crowding",
+            "Funding watchlist",
             _fmt_float(funding_z),
-            "Funding показывает перекос плеча. Высокий положительный funding чаще ухудшает reward/risk, чем подтверждает тренд.",
-            funding_tone,
-            funding_z is not None,
+            "Funding пока оставлен как short-history watchlist: сигнал виден, но в weighted context score он не участвует.",
+            _signal_tone(funding_score),
+            score=0,
+            available=funding_z is not None,
         ),
         _context_signal(
             "Perp premium",
             _fmt_pct(perp_premium, 2),
-            "Премия perpetual к индексу помогает понять, поддерживает ли деривативный слой спот или уже перегрет.",
-            premium_tone,
-            perp_premium is not None or perp_premium_z is not None,
+            "Дневная премия perpetual к индексу оказалась заметно сильнее z-score версии, поэтому в score используется именно она.",
+            _signal_tone(premium_score),
+            score=premium_score,
+            available=perp_premium is not None,
         ),
         _context_signal(
             "Open interest",
             _fmt_float(oi_z),
-            "Высокий OI сам по себе не bearish, но в сочетании с трендом чаще означает crowding, а не безопасное продолжение.",
-            oi_tone,
-            oi_z is not None,
+            "На доступной истории лучше работал low OI regime. Сигнал сильный, но coverage пока короткий, поэтому вес умеренный.",
+            _signal_tone(oi_score),
+            score=oi_score,
+            available=oi_z is not None,
         ),
         _context_signal(
-            "On-chain activity",
-            _fmt_float(onchain_z),
-            "Composite из active addresses и tx count. Это режимный фон сети, а не intraday trigger.",
-            onchain_tone,
-            onchain_z is not None,
+            "Active addresses",
+            _fmt_float(active_addresses_z),
+            "Composite on-chain score убран из context score: в backtest лучше работал именно z-score по unique addresses.",
+            _signal_tone(addresses_score),
+            score=addresses_score,
+            available=active_addresses_z is not None,
         ),
     ]
 
@@ -695,12 +701,8 @@ def calculate_regime_history(rows):
         stress_signals = _build_stress_signals(metrics)
         direction_score = sum(signal["impact"] for signal in direction_signals)
         stress_score = sum(signal["points"] for signal in stress_signals)
-        context_signals = _build_context_signals(metrics, direction_score, stress_score)
-        context_score = sum(
-            1 if signal["tone"] == "bull" else -1 if signal["tone"] == "bear" else 0
-            for signal in context_signals
-            if signal["available"]
-        )
+        context_signals = _build_context_signals(metrics)
+        context_score = sum(signal["score"] for signal in context_signals if signal["available"])
 
         regime = _classify_regime(metrics, direction_score, stress_score)
         confidence = _direction_confidence(direction_signals, direction_score, stress_score, regime["code"])
@@ -735,6 +737,7 @@ def calculate_regime_history(rows):
                 "perp_premium_daily": round(metrics["perp_premium_daily"] * 100, 3) if metrics["perp_premium_daily"] is not None else None,
                 "perp_premium_z_30d": round(metrics["perp_premium_z_30d"], 2) if metrics["perp_premium_z_30d"] is not None else None,
                 "open_interest_z_30d": round(metrics["open_interest_z_30d"], 2) if metrics["open_interest_z_30d"] is not None else None,
+                "unique_addresses_z_30d": round(metrics["unique_addresses_z_30d"], 2) if metrics["unique_addresses_z_30d"] is not None else None,
                 "onchain_activity_z_30d": round(metrics["onchain_activity_z_30d"], 2) if metrics["onchain_activity_z_30d"] is not None else None,
             }
         )
@@ -818,6 +821,7 @@ def build_regime_payload(rows):
             "perp_premium_daily": latest_point["perp_premium_daily"],
             "perp_premium_z_30d": latest_point["perp_premium_z_30d"],
             "open_interest_z_30d": latest_point["open_interest_z_30d"],
+            "unique_addresses_z_30d": latest_point["unique_addresses_z_30d"],
             "onchain_activity_z_30d": latest_point["onchain_activity_z_30d"],
         },
         "history": history[-540:],

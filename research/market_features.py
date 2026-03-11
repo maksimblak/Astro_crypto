@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-import time
 from datetime import datetime, timezone
 
 import numpy as np
@@ -11,9 +10,14 @@ import pandas as pd
 import requests
 
 from astro_shared import DB_PATH
+from derivatives_history import (
+    aggregate_derivatives_history,
+    fetch_derivatives_history,
+    save_derivatives_history_to_db,
+)
 
 
-FEATURE_SOURCE_VERSION = "market_features_v2"
+FEATURE_SOURCE_VERSION = "market_features_v3"
 HTTP_TIMEOUT = 30
 HTTP_HEADERS = {
     "User-Agent": "AstroBTC/1.0 (market feature pipeline)",
@@ -34,15 +38,20 @@ MARKET_FEATURE_COLUMNS = {
     "fear_greed_z_30d": "REAL",
     "funding_rate_daily": "REAL",
     "funding_rate_z_30d": "REAL",
+    "funding_source_count": "INTEGER",
     "perp_premium_daily": "REAL",
     "perp_premium_z_30d": "REAL",
+    "perp_premium_source_count": "INTEGER",
     "open_interest_value": "REAL",
     "open_interest_z_30d": "REAL",
+    "open_interest_source_count": "INTEGER",
+    "open_interest_primary_source": "TEXT",
     "unique_addresses": "REAL",
     "unique_addresses_z_30d": "REAL",
     "tx_count": "REAL",
     "tx_count_z_30d": "REAL",
     "onchain_activity_z_30d": "REAL",
+    "derivatives_source_version": "TEXT",
     "feature_source_version": "TEXT",
 }
 
@@ -61,19 +70,10 @@ def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     return normalized[required]
 
 
-def _request_json(session: requests.Session, url: str, params: dict | None = None) -> dict:
+def _request_json(session: requests.Session, url: str, params: dict | None = None):
     response = session.get(url, params=params, timeout=HTTP_TIMEOUT, headers=HTTP_HEADERS)
     response.raise_for_status()
     return response.json()
-
-
-def _date_to_epoch_ms(date_str: str) -> int:
-    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    return int(dt.timestamp() * 1000)
-
-
-def _epoch_ms_to_date(epoch_ms: int | str) -> str:
-    return datetime.fromtimestamp(int(epoch_ms) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
 def _epoch_to_date(epoch_seconds: int | str) -> str:
@@ -98,14 +98,13 @@ def _fetch_wikipedia_views(session: requests.Session, start_date: str, end_date:
         f"en.wikipedia.org/all-access/all-agents/Bitcoin/daily/{start_key}/{end_key}"
     )
     payload = _request_json(session, url)
-    rows = []
-    for item in payload.get("items", []):
-        rows.append(
-            {
-                "date": datetime.strptime(item["timestamp"][:8], "%Y%m%d").strftime("%Y-%m-%d"),
-                "wiki_views": float(item["views"]),
-            }
-        )
+    rows = [
+        {
+            "date": datetime.strptime(item["timestamp"][:8], "%Y%m%d").strftime("%Y-%m-%d"),
+            "wiki_views": float(item["views"]),
+        }
+        for item in payload.get("items", [])
+    ]
     if not rows:
         return _empty_frame()
     return pd.DataFrame(rows).sort_values("date").drop_duplicates("date", keep="last")
@@ -113,142 +112,13 @@ def _fetch_wikipedia_views(session: requests.Session, start_date: str, end_date:
 
 def _fetch_fear_greed(session: requests.Session) -> pd.DataFrame:
     payload = _request_json(session, "https://api.alternative.me/fng/", params={"limit": 0})
-    rows = []
-    for item in payload.get("data", []):
-        rows.append(
-            {
-                "date": _epoch_to_date(item["timestamp"]),
-                "fear_greed_value": float(item["value"]),
-            }
-        )
-    if not rows:
-        return _empty_frame()
-    return pd.DataFrame(rows).sort_values("date").drop_duplicates("date", keep="last")
-
-
-def _paginate_okx_records(
-    session: requests.Session,
-    url: str,
-    params: dict,
-    timestamp_getter,
-    start_ms: int,
-    limit: int = 100,
-    sleep_seconds: float = 0.12,
-) -> list:
-    cursor = None
-    records = []
-
-    for _ in range(300):
-        page_params = dict(params)
-        page_params["limit"] = limit
-        if cursor is not None:
-            page_params["after"] = cursor
-
-        payload = _request_json(session, url, params=page_params)
-        page = payload.get("data", [])
-        if not page:
-            break
-
-        records.extend(page)
-        oldest_ts = min(int(timestamp_getter(item)) for item in page)
-        if oldest_ts <= start_ms:
-            break
-        cursor = oldest_ts
-        time.sleep(sleep_seconds)
-
-    return records
-
-
-def _fetch_okx_funding(session: requests.Session, start_date: str) -> pd.DataFrame:
-    url = "https://www.okx.com/api/v5/public/funding-rate-history"
-    start_ms = _date_to_epoch_ms(start_date)
-    records = _paginate_okx_records(
-        session,
-        url,
-        {"instId": "BTC-USDT-SWAP"},
-        lambda item: item["fundingTime"],
-        start_ms,
-    )
-    if not records:
-        return _empty_frame()
-
-    rows = []
-    for item in records:
-        rows.append(
-            {
-                "date": _epoch_ms_to_date(item["fundingTime"]),
-                "funding_rate_daily": float(item.get("realizedRate") or item.get("fundingRate") or 0.0),
-            }
-        )
-    df = pd.DataFrame(rows)
-    df = df.groupby("date", as_index=False)["funding_rate_daily"].sum()
-    return df.sort_values("date")
-
-
-def _fetch_okx_candles(
-    session: requests.Session,
-    url: str,
-    params: dict,
-    start_date: str,
-) -> pd.DataFrame:
-    start_ms = _date_to_epoch_ms(start_date)
-    records = _paginate_okx_records(
-        session,
-        url,
-        params,
-        lambda item: item[0],
-        start_ms,
-    )
-    if not records:
-        return _empty_frame()
-
-    rows = []
-    for item in records:
-        rows.append(
-            {
-                "date": _epoch_ms_to_date(item[0]),
-                "close": float(item[4]),
-            }
-        )
-    return pd.DataFrame(rows).sort_values("date").drop_duplicates("date", keep="last")
-
-
-def _fetch_okx_perp_premium(session: requests.Session, start_date: str) -> pd.DataFrame:
-    mark_df = _fetch_okx_candles(
-        session,
-        "https://www.okx.com/api/v5/market/history-mark-price-candles",
-        {"instId": "BTC-USDT-SWAP", "bar": "1D"},
-        start_date,
-    ).rename(columns={"close": "mark_close"})
-    index_df = _fetch_okx_candles(
-        session,
-        "https://www.okx.com/api/v5/market/history-index-candles",
-        {"instId": "BTC-USDT", "bar": "1D"},
-        start_date,
-    ).rename(columns={"close": "index_close"})
-
-    if mark_df.empty or index_df.empty:
-        return _empty_frame()
-
-    df = mark_df.merge(index_df, on="date", how="inner")
-    df["perp_premium_daily"] = df["mark_close"] / df["index_close"].replace(0, np.nan) - 1.0
-    return df[["date", "perp_premium_daily"]].sort_values("date")
-
-
-def _fetch_okx_open_interest(session: requests.Session) -> pd.DataFrame:
-    payload = _request_json(
-        session,
-        "https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-volume",
-        params={"ccy": "BTC", "period": "1D"},
-    )
-    rows = []
-    for item in payload.get("data", []):
-        rows.append(
-            {
-                "date": _epoch_ms_to_date(item[0]),
-                "open_interest_value": float(item[1]),
-            }
-        )
+    rows = [
+        {
+            "date": _epoch_to_date(item["timestamp"]),
+            "fear_greed_value": float(item["value"]),
+        }
+        for item in payload.get("data", [])
+    ]
     if not rows:
         return _empty_frame()
     return pd.DataFrame(rows).sort_values("date").drop_duplicates("date", keep="last")
@@ -260,33 +130,28 @@ def _fetch_blockchain_chart(session: requests.Session, chart_name: str, value_co
         f"https://api.blockchain.info/charts/{chart_name}",
         params={"timespan": "all", "format": "json", "sampled": "false"},
     )
-    rows = []
-    for item in payload.get("values", []):
-        rows.append(
-            {
-                "date": _epoch_to_date(item["x"]),
-                value_column: float(item["y"]),
-            }
-        )
+    rows = [
+        {
+            "date": _epoch_to_date(item["x"]),
+            value_column: float(item["y"]),
+        }
+        for item in payload.get("values", [])
+    ]
     if not rows:
         return _empty_frame()
     return pd.DataFrame(rows).sort_values("date").drop_duplicates("date", keep="last")
 
 
-def fetch_external_feature_frames(start_date: str, end_date: str) -> list[pd.DataFrame]:
+def fetch_non_derivative_frames(start_date: str, end_date: str) -> list[pd.DataFrame]:
     frames = []
     with requests.Session() as session:
         session.headers.update(HTTP_HEADERS)
         fetchers = [
             ("wikipedia", lambda: _fetch_wikipedia_views(session, start_date, end_date)),
             ("fear_greed", lambda: _fetch_fear_greed(session)),
-            ("funding", lambda: _fetch_okx_funding(session, start_date)),
-            ("perp_premium", lambda: _fetch_okx_perp_premium(session, start_date)),
-            ("open_interest", lambda: _fetch_okx_open_interest(session)),
             ("unique_addresses", lambda: _fetch_blockchain_chart(session, "n-unique-addresses", "unique_addresses")),
             ("tx_count", lambda: _fetch_blockchain_chart(session, "n-transactions", "tx_count")),
         ]
-
         for name, fetcher in fetchers:
             try:
                 frame = fetcher()
@@ -294,7 +159,6 @@ def fetch_external_feature_frames(start_date: str, end_date: str) -> list[pd.Dat
                     frames.append(frame)
             except Exception as exc:  # pragma: no cover - network best effort
                 print(f"[market_features] {name} unavailable: {exc}")
-
     return frames
 
 
@@ -312,9 +176,7 @@ def init_market_features_table(conn: sqlite3.Connection):
     }
     for column, column_type in MARKET_FEATURE_COLUMNS.items():
         if column not in existing_columns:
-            conn.execute(
-                f"ALTER TABLE btc_market_features ADD COLUMN {column} {column_type}"
-            )
+            conn.execute(f"ALTER TABLE btc_market_features ADD COLUMN {column} {column_type}")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_market_features_version "
         "ON btc_market_features(feature_source_version)"
@@ -322,7 +184,7 @@ def init_market_features_table(conn: sqlite3.Connection):
     conn.commit()
 
 
-def build_market_features(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
+def build_market_features(df_ohlcv: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = _normalize_ohlcv(df_ohlcv)
     close = df["close"].astype(float)
     high = df["high"].astype(float)
@@ -365,12 +227,19 @@ def build_market_features(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
 
     start_date = features["date"].iloc[0]
     end_date = features["date"].iloc[-1]
-    base_dates = features[["date"]].copy().reset_index(drop=True)
-    for frame in fetch_external_feature_frames(start_date, end_date):
+    base_dates = features[["date"]].copy()
+
+    for frame in fetch_non_derivative_frames(start_date, end_date):
         base_dates = base_dates.merge(frame.reset_index(drop=True), on="date", how="left")
 
+    derivatives_history_df = fetch_derivatives_history(start_date, end_date)
+    derivatives_features_df = aggregate_derivatives_history(derivatives_history_df, base_dates["date"])
+    if not derivatives_features_df.empty:
+        base_dates = base_dates.merge(derivatives_features_df, on="date", how="left")
+
     features = features.merge(base_dates, on="date", how="left")
-    external_raw_columns = [
+
+    raw_ffill_columns = [
         "wiki_views",
         "fear_greed_value",
         "funding_rate_daily",
@@ -379,7 +248,7 @@ def build_market_features(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
         "unique_addresses",
         "tx_count",
     ]
-    available_raw_columns = [column for column in external_raw_columns if column in features.columns]
+    available_raw_columns = [column for column in raw_ffill_columns if column in features.columns]
     if available_raw_columns:
         features[available_raw_columns] = features[available_raw_columns].ffill()
 
@@ -388,11 +257,17 @@ def build_market_features(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
         features["wiki_views_z_30d"] = _rolling_z(features["wiki_views_7d"], 30, 10)
     if "fear_greed_value" in features:
         features["fear_greed_z_30d"] = _rolling_z(features["fear_greed_value"], 30, 10)
-    if "funding_rate_daily" in features:
+    if "funding_rate_daily" in features and "funding_rate_z_30d" not in features.columns:
         features["funding_rate_z_30d"] = _rolling_z(features["funding_rate_daily"], 30, 10)
-    if "perp_premium_daily" in features:
+    elif "funding_rate_daily" in features and features["funding_rate_z_30d"].isna().all():
+        features["funding_rate_z_30d"] = _rolling_z(features["funding_rate_daily"], 30, 10)
+    if "perp_premium_daily" in features and "perp_premium_z_30d" not in features.columns:
         features["perp_premium_z_30d"] = _rolling_z(features["perp_premium_daily"], 30, 10)
-    if "open_interest_value" in features:
+    elif "perp_premium_daily" in features and features["perp_premium_z_30d"].isna().all():
+        features["perp_premium_z_30d"] = _rolling_z(features["perp_premium_daily"], 30, 10)
+    if "open_interest_value" in features and "open_interest_z_30d" not in features.columns:
+        features["open_interest_z_30d"] = _rolling_z(features["open_interest_value"], 30, 10)
+    elif "open_interest_value" in features and features["open_interest_z_30d"].isna().all():
         features["open_interest_z_30d"] = _rolling_z(features["open_interest_value"], 30, 10)
     if "unique_addresses" in features:
         features["unique_addresses_z_30d"] = _rolling_z(features["unique_addresses"], 30, 10)
@@ -413,16 +288,13 @@ def build_market_features(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
 
     features["feature_source_version"] = FEATURE_SOURCE_VERSION
     features = features[list(MARKET_FEATURE_COLUMNS.keys())]
-    return features.replace({np.nan: None})
+    return features.replace({np.nan: None}), derivatives_history_df.replace({np.nan: None})
 
 
 def save_market_features_to_db(conn: sqlite3.Connection, features_df: pd.DataFrame):
     init_market_features_table(conn)
     columns = list(MARKET_FEATURE_COLUMNS.keys())
-    records = [
-        tuple(row[column] for column in columns)
-        for _, row in features_df.iterrows()
-    ]
+    records = [tuple(row[column] for column in columns) for _, row in features_df.iterrows()]
     placeholders = ", ".join(["?"] * len(columns))
     column_sql = ", ".join(columns)
     conn.executemany(
@@ -450,8 +322,9 @@ def main():
     conn = sqlite3.connect(DB_PATH)
     try:
         daily_df = load_daily_from_db(conn)
-        features_df = build_market_features(daily_df)
+        features_df, derivatives_history_df = build_market_features(daily_df)
         save_market_features_to_db(conn, features_df)
+        save_derivatives_history_to_db(conn, derivatives_history_df)
     finally:
         conn.close()
 
@@ -462,6 +335,7 @@ def main():
         "->",
         features_df["date"].iloc[-1],
     )
+    print("btc_derivatives_history rows:", len(derivatives_history_df))
 
 
 if __name__ == "__main__":

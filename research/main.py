@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 from astro_shared import yfinance_exclusive_end
+from derivatives_history import save_derivatives_history_to_db
 from market_features import build_market_features, save_market_features_to_db
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.db")
@@ -365,8 +366,9 @@ def main():
     save_daily_to_db(conn, df_ohlcv)
 
     # 3b. Строим market-features для режима рынка
-    market_features_df = build_market_features(df_ohlcv)
+    market_features_df, derivatives_history_df = build_market_features(df_ohlcv)
     save_market_features_to_db(conn, market_features_df)
+    save_derivatives_history_to_db(conn, derivatives_history_df)
 
     # 4. Поиск и классификация пиков/дно
     df = classify_points(prices, major_threshold=0.20, local_threshold=0.10)

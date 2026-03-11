@@ -760,10 +760,10 @@ function buildRegime(r) {
     { label: 'Просадка от ATH', value: `${r.metrics?.drawdown_ath ?? '—'}%`, sub: 'Насколько далеко рынок от пика' },
     { label: 'Wikipedia z', value: `${r.metrics?.wiki_views_z_30d ?? '—'}`, sub: 'Внешнее внимание к BTC vs 30д baseline' },
     { label: 'Fear & Greed', value: `${r.metrics?.fear_greed_value ?? '—'}`, sub: 'Сантимент толпы по шкале 0-100' },
-    { label: 'Funding z', value: `${r.metrics?.funding_rate_z_30d ?? '—'}`, sub: 'Crowding по perpetual funding' },
+    { label: 'Funding z', value: `${r.metrics?.funding_rate_z_30d ?? '—'}`, sub: 'Watchlist only: в context score пока не входит' },
     { label: 'Perp premium', value: `${r.metrics?.perp_premium_daily ?? '—'}%`, sub: 'Премия perpetual к spot/index' },
     { label: 'OI z', value: `${r.metrics?.open_interest_z_30d ?? '—'}`, sub: 'Насколько раздут открытый интерес' },
-    { label: 'On-chain z', value: `${r.metrics?.onchain_activity_z_30d ?? '—'}`, sub: 'Composite из addresses и tx count' },
+    { label: 'Active addr z', value: `${r.metrics?.unique_addresses_z_30d ?? '—'}`, sub: 'Сильнейший on-chain сигнал по backtest' },
   ];
 
   const directionSignalsHtml = (r.direction_signals || []).map(s => `

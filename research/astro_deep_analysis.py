@@ -211,9 +211,9 @@ def compute_astro_datasets(pivots, all_days):
         astro["is_major"] = "major" in row["type"] or "global" in row["type"]
         pivot_records.append(astro)
 
-    print("Астро для baseline (каждый 3-й день)...")
+    print("Астро для baseline (random sample ~33%)...")
     base_records = []
-    for _, row in all_days.iloc[::3].iterrows():
+    for _, row in all_days.sample(frac=1/3, random_state=42).iterrows():
         astro = get_full_astro(row["date"].to_pydatetime())
         base_records.append(astro)
         if len(base_records) % 100 == 0:
