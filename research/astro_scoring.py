@@ -29,6 +29,7 @@ try:
         ECLIPSE_DATES,
         ELEMENT_MAP,
         MODALITY_MAP,
+        apply_bh_correction,
         get_zodiac_sign,
         today_local_date,
     )
@@ -38,6 +39,7 @@ except ImportError:
         ECLIPSE_DATES,
         ELEMENT_MAP,
         MODALITY_MAP,
+        apply_bh_correction,
         get_zodiac_sign,
         today_local_date,
     )
@@ -75,10 +77,13 @@ REVERSAL_FEATURE_LABELS = {
     "moon_node_conj": "Луна у узла",
     "moon_node_square": "Луна квадрат узлам",
     "saturn_square_nodes": "Сатурн квадрат узлам",
+    "sun_cancer": "Солнце в Раке (июнь-июль)",
+    "sun_gemini": "Солнце в Близнецах (май-июнь)",
+    "sun_cardinal": "Солнце в кардинальном знаке",
 }
 
 CONTINUOUS_REVERSAL_FEATURE_LABELS = {
-    "days_to_eclipse": "Дни до затмения",
+    "log_days_to_eclipse": "Дни до затмения (log)",
     "station_strength": "Сила станции",
     "moon_age_sin": "Лунный цикл sin",
     "moon_age_cos": "Лунный цикл cos",
@@ -95,6 +100,10 @@ DIRECTION_FEATURE_LABELS = {
     "moon_node_conj": "Луна у узла",
     "moon_node_square": "Луна квадрат узлам",
     "saturn_square_nodes": "Сатурн квадрат узлам",
+    "sun_cancer": "Солнце в Раке (июнь-июль)",
+    "sun_gemini": "Солнце в Близнецах (май-июнь)",
+    "sun_cardinal": "Солнце в кардинальном знаке",
+    "sun_libra": "Солнце в Весах (сент-окт)",
 }
 
 
@@ -240,7 +249,10 @@ def _station_strength(date, window_days=6):
     return round(best, 4)
 
 
-def extract_astro_profile(date):
+def extract_astro_profile(date, eclipse_dates=None):
+    """Астро-профиль для даты. eclipse_dates ограничивает список затмений (фикс data leakage)."""
+    if eclipse_dates is None:
+        eclipse_dates = ECLIPSE_DATES
     d = ephem.Date(date)
     d_prev = ephem.Date(date - timedelta(days=1))
     moon = ephem.Moon(d)
@@ -259,7 +271,10 @@ def extract_astro_profile(date):
     moon_cycle_pos = float((d - prev_new) / cycle_len)
     moon_cycle_angle = 2 * math.pi * moon_cycle_pos
 
-    min_eclipse = min(abs((date - ed).days) for ed in ECLIPSE_DATES)
+    if eclipse_dates:
+        min_eclipse = min(abs((date - ed).days) for ed in eclipse_dates)
+    else:
+        min_eclipse = 999
     moon_ingress, new_sign = _detect_ingress(ephem.Moon, d, window_hours=6)
     station_strength = _station_strength(date)
 
@@ -300,6 +315,11 @@ def extract_astro_profile(date):
             elif abs(diff - 120) <= 8 or abs(diff - 60) <= 6:
                 harmony += 1
 
+    sun_lon = bodies["Солнце"]
+    sun_sign = get_zodiac_sign(sun_lon)
+    sun_element = ELEMENT_MAP[sun_sign]
+    sun_modality = MODALITY_MAP[sun_sign]
+
     features = {
         "new_1d": dist_new <= 1,
         "new_2d": 1 < dist_new <= 2,
@@ -324,7 +344,12 @@ def extract_astro_profile(date):
         "moon_earth": moon_element == "Земля",
         "moon_mutable": moon_modality == "Мутабельный",
         "moon_cardinal": moon_modality == "Кардинальный",
+        "sun_cancer": sun_sign == "Рак",
+        "sun_gemini": sun_sign == "Близнецы",
+        "sun_libra": sun_sign == "Весы",
+        "sun_cardinal": sun_modality == "Кардинальный",
         "days_to_eclipse": float(min_eclipse),
+        "log_days_to_eclipse": math.log1p(float(min_eclipse)),
         "station_strength": station_strength,
         "moon_age_sin": math.sin(moon_cycle_angle),
         "moon_age_cos": math.cos(moon_cycle_angle),
@@ -337,6 +362,8 @@ def extract_astro_profile(date):
         "details": [],
         "moon_sign": moon_sign,
         "moon_element": moon_element,
+        "sun_sign": sun_sign,
+        "sun_element": sun_element,
         "quarter": quarter,
         "retro_planets": retro_planets,
         "station_planets": station_planets,
@@ -375,11 +402,16 @@ def load_historical_data():
     return pivots, all_days
 
 
-def build_history_features(all_days: pd.DataFrame) -> pd.DataFrame:
+def build_history_features(all_days: pd.DataFrame, eclipse_cutoff: datetime | None = None) -> pd.DataFrame:
+    """Считает астро для всей истории. eclipse_cutoff ограничивает список затмений."""
     print("\nПодсчёт астропризнаков для всей истории...")
+    if eclipse_cutoff is not None:
+        allowed_eclipses = [ed for ed in ECLIPSE_DATES if ed <= eclipse_cutoff]
+    else:
+        allowed_eclipses = ECLIPSE_DATES
     records = []
     for idx, row in all_days.iterrows():
-        record = extract_astro_profile(row["date"].to_pydatetime())
+        record = extract_astro_profile(row["date"].to_pydatetime(), eclipse_dates=allowed_eclipses)
         record["close"] = row["close"]
         records.append(record)
         if (idx + 1) % 250 == 0:
@@ -429,10 +461,9 @@ def fit_reversal_model(train_df: pd.DataFrame) -> dict:
     pivots = train_df[train_df["is_pivot"]]
     non_pivots = train_df[~train_df["is_pivot"]]
 
-    weights = {}
+    # --- Шаг 1: собираем все p-values для binary и continuous ---
+    binary_candidates = []
     diagnostics = []
-    continuous_weights = {}
-    continuous_diagnostics = []
 
     for col, label in REVERSAL_FEATURE_LABELS.items():
         pivot_count = int(pivots[col].sum())
@@ -442,13 +473,14 @@ def fit_reversal_model(train_df: pd.DataFrame) -> dict:
         p_value = stats.binomtest(pivot_count, len(pivots), base_rate).pvalue
         pivot_pct = pivot_count / len(pivots)
         lift = pivot_pct / base_rate
-        if p_value <= 0.25:
-            weight = _shrunken_weight(lift, p_value, scale=3.0, p_cap=0.25)
-            if pivot_pct < base_rate:
-                weight *= -1
-            if abs(weight) >= 0.15:
-                weights[col] = weight
+        binary_candidates.append({
+            "col": col, "label": label, "p_value": p_value,
+            "pivot_pct": pivot_pct, "base_rate": base_rate, "lift": lift,
+        })
         diagnostics.append((label, pivot_pct * 100, base_rate * 100, p_value))
+
+    continuous_candidates = []
+    continuous_diagnostics = []
 
     for col, label in CONTINUOUS_REVERSAL_FEATURE_LABELS.items():
         pivot_values = pivots[col].astype(float)
@@ -456,17 +488,50 @@ def fit_reversal_model(train_df: pd.DataFrame) -> dict:
         base_std = float(base_values.std(ddof=0))
         if base_std <= 1e-9:
             continue
-
         t_stat, p_value = stats.ttest_ind(pivot_values, base_values, equal_var=False)
         effect_size = (float(pivot_values.mean()) - float(base_values.mean())) / base_std
-        weight = _continuous_weight(effect_size, p_value)
-        if p_value <= 0.25 and abs(weight) >= 0.05:
-            continuous_weights[col] = {
-                "weight": weight,
-                "mean": float(base_values.mean()),
-                "std": base_std,
-            }
+        continuous_candidates.append({
+            "col": col, "label": label, "p_value": float(p_value),
+            "effect_size": float(effect_size),
+            "base_mean": float(base_values.mean()), "base_std": base_std,
+        })
         continuous_diagnostics.append((label, float(pivot_values.mean()), float(base_values.mean()), float(p_value), float(effect_size)))
+
+    # --- Шаг 2: BH-коррекция по ВСЕМ тестам совместно ---
+    all_records = []
+    for item in binary_candidates:
+        all_records.append({"source": "binary", "col": item["col"], "p_value": item["p_value"]})
+    for item in continuous_candidates:
+        all_records.append({"source": "continuous", "col": item["col"], "p_value": item["p_value"]})
+
+    apply_bh_correction(all_records)
+    q_map = {rec["col"]: rec["q_value"] for rec in all_records}
+
+    # --- Шаг 3: отбираем по q_value < 0.25 (стандартный exploratory FDR) ---
+    FDR_THRESHOLD = 0.25
+    weights = {}
+    for item in binary_candidates:
+        q_value = q_map.get(item["col"], 1.0)
+        if q_value >= FDR_THRESHOLD:
+            continue
+        weight = _shrunken_weight(item["lift"], item["p_value"], scale=3.0, p_cap=FDR_THRESHOLD)
+        if item["pivot_pct"] < item["base_rate"]:
+            weight *= -1
+        if abs(weight) >= 0.15:
+            weights[item["col"]] = weight
+
+    continuous_weights = {}
+    for item in continuous_candidates:
+        q_value = q_map.get(item["col"], 1.0)
+        if q_value >= FDR_THRESHOLD:
+            continue
+        weight = _continuous_weight(item["effect_size"], item["p_value"], p_cap=FDR_THRESHOLD)
+        if abs(weight) >= 0.05:
+            continuous_weights[item["col"]] = {
+                "weight": weight,
+                "mean": item["base_mean"],
+                "std": item["base_std"],
+            }
 
     return {
         "weights": weights,
@@ -484,7 +549,8 @@ def fit_direction_model(train_df: pd.DataFrame) -> dict:
     highs = pivots[pivots["is_high"]]
     lows = pivots[~pivots["is_high"]]
 
-    weights = {}
+    # --- Шаг 1: собираем все p-values ---
+    candidates = []
     diagnostics = []
 
     for col, label in DIRECTION_FEATURE_LABELS.items():
@@ -498,13 +564,29 @@ def fit_direction_model(train_df: pd.DataFrame) -> dict:
         high_rate = high_count / max(len(highs), 1)
         low_rate = low_count / max(len(lows), 1)
         lift = (high_rate + 1e-6) / (low_rate + 1e-6)
-        if p_value <= 0.35:
-            weight = _shrunken_weight(lift, p_value, scale=2.0, p_cap=0.35)
-            if high_rate < low_rate:
-                weight *= -1
-            if abs(weight) >= 0.10:
-                weights[col] = weight
+        candidates.append({
+            "col": col, "label": label, "p_value": float(p_value),
+            "high_rate": high_rate, "low_rate": low_rate, "lift": lift,
+        })
         diagnostics.append((label, high_rate * 100, low_rate * 100, p_value))
+
+    # --- Шаг 2: BH-коррекция ---
+    fdr_records = [{"col": c["col"], "p_value": c["p_value"]} for c in candidates]
+    apply_bh_correction(fdr_records)
+    q_map = {rec["col"]: rec["q_value"] for rec in fdr_records}
+
+    # --- Шаг 3: отбор по q_value < 0.25 (стандартный exploratory FDR) ---
+    FDR_THRESHOLD = 0.25
+    weights = {}
+    for item in candidates:
+        q_value = q_map.get(item["col"], 1.0)
+        if q_value >= FDR_THRESHOLD:
+            continue
+        weight = _shrunken_weight(item["lift"], item["p_value"], scale=2.0, p_cap=FDR_THRESHOLD)
+        if item["high_rate"] < item["low_rate"]:
+            weight *= -1
+        if abs(weight) >= 0.10:
+            weights[item["col"]] = weight
 
     return {
         "weights": weights,
@@ -516,6 +598,93 @@ def fit_scoring_model(train_df: pd.DataFrame) -> dict:
     return {
         "reversal_model": fit_reversal_model(train_df),
         "direction_model": fit_direction_model(train_df),
+    }
+
+
+def refit_model(full_df: pd.DataFrame, train_model: dict) -> dict:
+    """Переоценивает веса на полных данных, используя признаки отобранные на train.
+
+    Отбор признаков (BH-коррекция) делается ТОЛЬКО на train.
+    Full model просто re-fit весов для тех же признаков — повторный BH не нужен.
+    """
+    full_df = full_df.copy()
+    full_df["is_pivot"] = full_df["is_pivot"].astype(bool)
+    full_df["is_high"] = full_df["is_high"].astype(bool)
+    pivots = full_df[full_df["is_pivot"]]
+    non_pivots = full_df[~full_df["is_pivot"]]
+
+    FDR_THRESHOLD = 0.25
+
+    # --- Reversal: refit только для отобранных на train признаков ---
+    selected_binary = set(train_model["reversal_model"]["weights"].keys())
+    selected_continuous = set(train_model["reversal_model"]["continuous_weights"].keys())
+
+    weights = {}
+    for col in selected_binary:
+        label = REVERSAL_FEATURE_LABELS.get(col, col)
+        pivot_count = int(pivots[col].sum())
+        base_rate = float(non_pivots[col].mean())
+        if pivot_count < 2 or base_rate <= 0 or base_rate >= 1:
+            continue
+        p_value = stats.binomtest(pivot_count, len(pivots), base_rate).pvalue
+        pivot_pct = pivot_count / len(pivots)
+        lift = pivot_pct / base_rate
+        weight = _shrunken_weight(lift, p_value, scale=3.0, p_cap=FDR_THRESHOLD)
+        if pivot_pct < base_rate:
+            weight *= -1
+        if abs(weight) >= 0.15:
+            weights[col] = weight
+
+    continuous_weights = {}
+    for col in selected_continuous:
+        pivot_values = pivots[col].astype(float)
+        base_values = non_pivots[col].astype(float)
+        base_std = float(base_values.std(ddof=0))
+        if base_std <= 1e-9:
+            continue
+        _, p_value = stats.ttest_ind(pivot_values, base_values, equal_var=False)
+        effect_size = (float(pivot_values.mean()) - float(base_values.mean())) / base_std
+        weight = _continuous_weight(effect_size, float(p_value), p_cap=FDR_THRESHOLD)
+        if abs(weight) >= 0.05:
+            continuous_weights[col] = {
+                "weight": weight,
+                "mean": float(base_values.mean()),
+                "std": base_std,
+            }
+
+    # --- Direction: refit отобранных на train ---
+    selected_direction = set(train_model["direction_model"]["weights"].keys())
+    highs = pivots[pivots["is_high"]]
+    lows = pivots[~pivots["is_high"]]
+
+    dir_weights = {}
+    for col in selected_direction:
+        high_count = int(highs[col].sum())
+        low_count = int(lows[col].sum())
+        if high_count + low_count < 2:
+            continue
+        table = np.array([[high_count, len(highs) - high_count], [low_count, len(lows) - low_count]])
+        _, p_value = stats.fisher_exact(table)
+        high_rate = high_count / max(len(highs), 1)
+        low_rate = low_count / max(len(lows), 1)
+        lift = (high_rate + 1e-6) / (low_rate + 1e-6)
+        weight = _shrunken_weight(lift, p_value, scale=2.0, p_cap=FDR_THRESHOLD)
+        if high_rate < low_rate:
+            weight *= -1
+        if abs(weight) >= 0.10:
+            dir_weights[col] = weight
+
+    return {
+        "reversal_model": {
+            "weights": weights,
+            "diagnostics": train_model["reversal_model"]["diagnostics"],
+            "continuous_weights": continuous_weights,
+            "continuous_diagnostics": train_model["reversal_model"]["continuous_diagnostics"],
+        },
+        "direction_model": {
+            "weights": dir_weights,
+            "diagnostics": train_model["direction_model"]["diagnostics"],
+        },
     }
 
 
@@ -569,11 +738,50 @@ def score_history(history_df: pd.DataFrame, model: dict) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def derive_thresholds(reference_scores: np.ndarray) -> list[float]:
-    if len(reference_scores) == 0:
+def derive_thresholds(
+    base_scores: np.ndarray,
+    pivot_scores: np.ndarray | None = None,
+    target_precisions: tuple[float, ...] = (3.0, 5.0, 8.0, 12.0),
+) -> list[float]:
+    """Precision-based пороги: для каждого target_precision% находим порог score.
+
+    Precision = pivot_above / (pivot_above + base_above) * 100.
+    Если pivot_scores не переданы — fallback на квантили base_scores.
+    """
+    if len(base_scores) == 0:
         return [0.5, 1.0, 1.5, 2.0]
-    raw = sorted({round(float(np.quantile(reference_scores, q)), 1) for q in [0.75, 0.85, 0.90, 0.95]})
-    thresholds = [value for value in raw if value > 0]
+
+    if pivot_scores is None or len(pivot_scores) == 0:
+        raw = sorted({round(float(np.quantile(base_scores, q)), 1) for q in [0.75, 0.85, 0.90, 0.95]})
+        thresholds = [v for v in raw if v > 0]
+        if not thresholds:
+            return [0.5, 1.0, 1.5, 2.0]
+        while len(thresholds) < 4:
+            thresholds.append(round(thresholds[-1] + 0.5, 1))
+        return thresholds[:4]
+
+    all_scores = np.concatenate([base_scores, pivot_scores])
+    unique_thresholds = sorted(t for t in set(round(float(s), 1) for s in all_scores) if t > 0)
+    if not unique_thresholds:
+        return [0.5, 1.0, 1.5, 2.0]
+
+    thresholds = []
+    for target_pct in target_precisions:
+        best_t = None
+        for t in unique_thresholds:
+            p_above = int((pivot_scores >= t).sum())
+            b_above = int((base_scores >= t).sum())
+            if p_above + b_above == 0:
+                continue
+            precision = p_above / (p_above + b_above) * 100
+            if precision >= target_pct:
+                best_t = t
+                break
+        if best_t is not None:
+            thresholds.append(best_t)
+
+    # Дедупликация и гарантия 4 порогов
+    thresholds = sorted(set(thresholds))
     if not thresholds:
         return [0.5, 1.0, 1.5, 2.0]
     while len(thresholds) < 4:
@@ -678,7 +886,14 @@ def validate_model():
     print("=" * 90)
 
     pivots, all_days = load_historical_data()
-    history_df = build_history_features(all_days)
+
+    # Определяем split_date до подсчёта признаков (для eclipse leakage fix)
+    split_idx = max(1, min(int(len(all_days) * 0.80), len(all_days) - 1))
+    split_date = all_days.loc[split_idx, "date"].to_pydatetime()
+    print(f"  Eclipse cutoff для train: {split_date.strftime('%Y-%m-%d')}")
+
+    # Train-данные считаются только с затмениями до split_date (no leakage)
+    history_df = build_history_features(all_days, eclipse_cutoff=split_date)
     history_df = annotate_pivots(history_df, pivots)
     history_df, split_start = assign_sample_split(history_df)
 
@@ -706,8 +921,9 @@ def validate_model():
 
     train_pdf = scored_history[(scored_history["sample_split"] == "train") & (scored_history["is_pivot"])].copy()
     train_base = scored_history[(scored_history["sample_split"] == "train") & (~scored_history["is_pivot"])]["score"].to_numpy()
-    thresholds = derive_thresholds(train_base)
-    print(f"\n  Пороги из train non-pivot quantiles: {', '.join(f'{t:.1f}' for t in thresholds)}")
+    train_pivot_scores = train_pdf["score"].to_numpy()
+    thresholds = derive_thresholds(train_base, train_pivot_scores)
+    print(f"\n  Precision-based пороги из train: {', '.join(f'{t:.1f}' for t in thresholds)}")
 
     test_pdf = scored_history[(scored_history["sample_split"] == "test") & (scored_history["is_pivot"])].copy()
     test_base = scored_history[(scored_history["sample_split"] == "test") & (~scored_history["is_pivot"])]["score"].to_numpy()
@@ -715,17 +931,23 @@ def validate_model():
     train_metrics = print_validation_block("TRAIN", train_pdf, train_base, thresholds)
     test_metrics = print_validation_block("TEST (holdout)", test_pdf, test_base, thresholds)
 
-    full_model = fit_scoring_model(history_df)
-    full_scored_history = score_history(history_df, full_model)
-    full_scored_history["close"] = history_df["close"]
-    full_scored_history["type"] = history_df["type"]
-    full_scored_history["price"] = history_df["price"]
-    full_scored_history["pct_change"] = history_df["pct_change"]
-    full_scored_history["is_pivot"] = history_df["is_pivot"].astype(bool)
-    full_scored_history["is_high"] = history_df["is_high"].astype(bool)
-    full_scored_history["sample_split"] = history_df["sample_split"]
+    # Full model: используем ВСЕ затмения (для календаря будущего)
+    full_history_df = build_history_features(all_days)
+    full_history_df = annotate_pivots(full_history_df, pivots)
+    full_history_df["sample_split"] = history_df["sample_split"]
+
+    full_model = refit_model(full_history_df, train_model)
+    full_scored_history = score_history(full_history_df, full_model)
+    full_scored_history["close"] = full_history_df["close"]
+    full_scored_history["type"] = full_history_df["type"]
+    full_scored_history["price"] = full_history_df["price"]
+    full_scored_history["pct_change"] = full_history_df["pct_change"]
+    full_scored_history["is_pivot"] = full_history_df["is_pivot"].astype(bool)
+    full_scored_history["is_high"] = full_history_df["is_high"].astype(bool)
+    full_scored_history["sample_split"] = full_history_df["sample_split"]
     full_base = full_scored_history[~full_scored_history["is_pivot"]]["score"].to_numpy()
-    full_thresholds = derive_thresholds(full_base)
+    full_pivot = full_scored_history[full_scored_history["is_pivot"]]["score"].to_numpy()
+    full_thresholds = derive_thresholds(full_base, full_pivot)
 
     return scored_history, test_pdf, test_base, test_metrics, full_model, thresholds, full_scored_history, full_thresholds
 
@@ -872,6 +1094,8 @@ def save_calendar_to_db(calendar_df):
                 "direction_score": row["direction_score"],
                 "moon_sign": row["moon_sign"],
                 "moon_element": row["moon_element"],
+                "sun_sign": row.get("sun_sign", ""),
+                "sun_element": row.get("sun_element", ""),
                 "quarter": row["quarter"],
                 "eclipse_days": row["eclipse_days"],
                 "days_to_eclipse": row["days_to_eclipse"],
@@ -905,6 +1129,8 @@ def save_history_to_db(history_df):
                 "direction_score": row["direction_score"],
                 "moon_sign": row["moon_sign"],
                 "moon_element": row["moon_element"],
+                "sun_sign": row.get("sun_sign", ""),
+                "sun_element": row.get("sun_element", ""),
                 "quarter": row["quarter"],
                 "eclipse_days": row["eclipse_days"],
                 "days_to_eclipse": row["days_to_eclipse"],
@@ -946,7 +1172,8 @@ def main():
         dir_str = "↑ ПИК" if row["direction"] > 0 else "↓ ДНО" if row["direction"] < 0 else "  ?"
         days_away = (row["date"] - today).days
         print(f"\n  {row['date'].strftime('%Y-%m-%d')} (через {days_away}д)  СКОР: {row['score']:.1f}  {dir_str}")
-        print(f"    {row['quarter']} | Луна в {row['moon_sign']} ({row['moon_element']})")
+        sun_info = f" | Солнце в {row['sun_sign']}" if row.get("sun_sign") else ""
+        print(f"    {row['quarter']} | Луна в {row['moon_sign']} ({row['moon_element']}){sun_info}")
         for detail in row["details"]:
             print(f"    {detail}")
 
