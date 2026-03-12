@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 _project_root = Path(__file__).resolve().parent.parent
 _dashboard_dir = str(_project_root / "dashboard")
 if _dashboard_dir not in sys.path:
-    sys.path.insert(0, _dashboard_dir)
+    sys.path.append(_dashboard_dir)
 
 from backend.routers import astro, market, regime, system  # noqa: E402
 

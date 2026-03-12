@@ -44,8 +44,8 @@ def _market_feature_select_sql(conn: sqlite3.Connection) -> str:
 def api_regime():
     with _regime_lock:
         cached = _regime_cache.get("regime")
-    if cached is not None:
-        return cached
+        if cached is not None:
+            return cached
 
     from market_regime import build_regime_payload
 

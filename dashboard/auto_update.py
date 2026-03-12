@@ -134,13 +134,27 @@ def run_update_pipeline() -> bool:
         for stage_name, command in _pipeline_commands():
             with _STATUS_LOCK:
                 _write_status({"last_stage": stage_name})
-            completed = subprocess.run(
-                command,
-                cwd=str(BASE_DIR),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            try:
+                completed = subprocess.run(
+                    command,
+                    cwd=str(BASE_DIR),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=600,
+                )
+            except subprocess.TimeoutExpired:
+                _append_log(f"{stage_name} TIMEOUT", "Killed after 600s")
+                with _STATUS_LOCK:
+                    _write_status(
+                        {
+                            "running": False,
+                            "last_finished_at": _now_iso(),
+                            "last_error": f"{stage_name} timed out after 600s",
+                            "last_stage": stage_name,
+                        }
+                    )
+                return False
             output = (completed.stdout or "").strip()
             error_output = (completed.stderr or "").strip()
             combined_output = "\n".join(part for part in [output, error_output] if part)
@@ -183,7 +197,8 @@ def _auto_update_loop():
         try:
             run_update_pipeline()
         except Exception as exc:  # pragma: no cover - defensive background guard
-            _append_log("auto_update exception", repr(exc))
+            import traceback
+            _append_log("auto_update exception", traceback.format_exc())
             with _STATUS_LOCK:
                 _write_status(
                     {
