@@ -3,8 +3,10 @@ from __future__ import annotations
 import math
 import os
 from datetime import date, datetime, timedelta
+from functools import lru_cache
 
-import ephem
+from skyfield.api import load, Topos
+from skyfield.framelib import ecliptic_frame
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "btc_research.duckdb")
@@ -71,29 +73,82 @@ ECLIPSES = [
 ]
 ECLIPSE_DATES = [datetime.strptime(event_date, "%Y-%m-%d") for event_date, _ in ECLIPSES]
 
+# ---------------------------------------------------------------------------
+# Skyfield globals (loaded once)
+# ---------------------------------------------------------------------------
+_eph = load("de421.bsp")
+_ts = load.timescale()
+_earth = _eph["earth"]
+_sun = _eph["sun"]
+_moon = _eph["moon"]
 
-def get_zodiac_sign(lon_deg: float) -> str:
-    return ZODIAC_SIGNS[int(lon_deg % 360 / 30)]
+# Planet lookup by ephem-compatible class name or Russian name
+PLANET_TARGETS = {
+    "Sun": _sun,
+    "Moon": _moon,
+    "Mercury": _eph["mercury"],
+    "Venus": _eph["venus"],
+    "Mars": _eph["mars barycenter"],
+    "Jupiter": _eph["jupiter barycenter"],
+    "Saturn": _eph["saturn barycenter"],
+    "Uranus": _eph["uranus barycenter"],
+    "Neptune": _eph["neptune barycenter"],
+    "Pluto": _eph["pluto barycenter"],
+    "Солнце": _sun,
+    "Луна": _moon,
+    "Меркурий": _eph["mercury"],
+    "Венера": _eph["venus"],
+    "Марс": _eph["mars barycenter"],
+    "Юпитер": _eph["jupiter barycenter"],
+    "Сатурн": _eph["saturn barycenter"],
+    "Уран": _eph["uranus barycenter"],
+    "Нептун": _eph["neptune barycenter"],
+    "Плутон": _eph["pluto barycenter"],
+}
 
 
-def today_local_date() -> date:
-    return datetime.now().astimezone().date()
+def _to_skyfield_time(d):
+    """Convert datetime/date to Skyfield Time object."""
+    if isinstance(d, datetime):
+        return _ts.utc(d.year, d.month, d.day, d.hour, d.minute, d.second)
+    if isinstance(d, date):
+        return _ts.utc(d.year, d.month, d.day)
+    return d  # already a Skyfield Time
 
 
-def yfinance_exclusive_end(base_date: date | None = None) -> str:
-    current_date = base_date or today_local_date()
-    return (current_date + timedelta(days=1)).isoformat()
+def ecliptic_lon_deg_for_target(target, d) -> float:
+    """Ecliptic longitude in degrees (0-360) for a Skyfield target at date d."""
+    t = _to_skyfield_time(d)
+    astrometric = _earth.at(t).observe(target)
+    _, lon, _ = astrometric.apparent().frame_latlon(ecliptic_frame)
+    return lon.degrees % 360
 
 
 def ecliptic_lon_deg(body) -> float:
-    """Эклиптическая долгота тела в градусах (0–360)."""
-    return float(ephem.Ecliptic(body).lon) * 180.0 / math.pi
+    """Compatibility wrapper: compute ecliptic longitude from a body dict.
+
+    For backward compatibility with code that passes a pre-created 'body'.
+    Now body should be a dict with 'target' and 'time' keys.
+    """
+    if isinstance(body, dict):
+        return ecliptic_lon_deg_for_target(body["target"], body["time"])
+    raise TypeError(f"ecliptic_lon_deg expects a dict, got {type(body)}")
 
 
-def is_retrograde(planet_class, d_now, d_prev) -> bool:
-    """Планета ретроградна (движется назад по эклиптике)."""
-    lon_now = ecliptic_lon_deg(planet_class(d_now))
-    lon_prev = ecliptic_lon_deg(planet_class(d_prev))
+def planet_lon_deg(name_or_target, d) -> float:
+    """Get ecliptic longitude for a planet by name or Skyfield target."""
+    if isinstance(name_or_target, str):
+        target = PLANET_TARGETS[name_or_target]
+    else:
+        target = name_or_target
+    return ecliptic_lon_deg_for_target(target, d)
+
+
+def is_retrograde(planet_name: str, d_now, d_prev) -> bool:
+    """Planet is retrograde (moving backward in ecliptic longitude)."""
+    target = PLANET_TARGETS[planet_name] if isinstance(planet_name, str) else planet_name
+    lon_now = ecliptic_lon_deg_for_target(target, d_now)
+    lon_prev = ecliptic_lon_deg_for_target(target, d_prev)
     diff = lon_now - lon_prev
     if diff > 180:
         diff -= 360
@@ -102,13 +157,19 @@ def is_retrograde(planet_class, d_now, d_prev) -> bool:
     return diff < 0
 
 
-def is_stationary(planet_class, d_now, orb_days: int = 2) -> bool:
-    """Планета стационарная (меняет направление в пределах ±orb_days)."""
-    d_before = ephem.Date(d_now - orb_days)
-    d_after = ephem.Date(d_now + orb_days)
-    lon_before = ecliptic_lon_deg(planet_class(d_before))
-    lon_now = ecliptic_lon_deg(planet_class(d_now))
-    lon_after = ecliptic_lon_deg(planet_class(d_after))
+def is_stationary(planet_name: str, d_now, orb_days: int = 2) -> bool:
+    """Planet is stationary (changes direction within ±orb_days)."""
+    if isinstance(d_now, (date, datetime)):
+        dt = d_now if isinstance(d_now, datetime) else datetime(d_now.year, d_now.month, d_now.day)
+    else:
+        dt = d_now.utc_datetime()
+    d_before = dt - timedelta(days=orb_days)
+    d_after = dt + timedelta(days=orb_days)
+
+    target = PLANET_TARGETS[planet_name] if isinstance(planet_name, str) else planet_name
+    lon_before = ecliptic_lon_deg_for_target(target, d_before)
+    lon_now = ecliptic_lon_deg_for_target(target, dt)
+    lon_after = ecliptic_lon_deg_for_target(target, d_after)
 
     def _norm(a: float, b: float) -> float:
         diff = a - b
@@ -121,6 +182,132 @@ def is_stationary(planet_class, d_now, orb_days: int = 2) -> bool:
     d1 = _norm(lon_now, lon_before)
     d2 = _norm(lon_after, lon_now)
     return (d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)
+
+
+# ---------------------------------------------------------------------------
+# Moon phases (replacing ephem.previous_new_moon etc.)
+# ---------------------------------------------------------------------------
+
+def _moon_sun_elongation(t) -> float:
+    """Elongation of Moon from Sun in degrees (0-360)."""
+    sun_lon = ecliptic_lon_deg_for_target(_sun, t)
+    moon_lon = ecliptic_lon_deg_for_target(_moon, t)
+    return (moon_lon - sun_lon) % 360
+
+
+def _find_phase(d, target_elongation: float, direction: str = "previous") -> datetime:
+    """Find nearest new/full/quarter moon by searching for target elongation.
+
+    target_elongation: 0=new, 90=first quarter, 180=full, 270=last quarter
+    direction: 'previous' or 'next'
+    """
+    if isinstance(d, (date, datetime)):
+        dt = d if isinstance(d, datetime) else datetime(d.year, d.month, d.day)
+    else:
+        dt = d.utc_datetime()
+
+    step = timedelta(days=-1 if direction == "previous" else 1)
+    current = dt
+
+    # Coarse search (1-day steps, up to 35 days)
+    prev_diff = None
+    for _ in range(35):
+        elong = _moon_sun_elongation(current)
+        diff = (elong - target_elongation) % 360
+        if diff > 180:
+            diff -= 360
+        if prev_diff is not None:
+            if (direction == "previous" and prev_diff <= 0 < diff) or \
+               (direction == "next" and prev_diff >= 0 > diff):
+                # Crossed the target — refine between current-step and current
+                break
+        prev_diff = diff
+        current += step
+
+    # Fine search (binary search, 1-minute precision)
+    a = current - step
+    b = current
+    for _ in range(20):
+        mid = a + (b - a) / 2
+        elong = _moon_sun_elongation(mid)
+        diff = (elong - target_elongation) % 360
+        if diff > 180:
+            diff -= 360
+        if abs(diff) < 0.01:
+            return mid
+        if diff > 0:
+            if direction == "previous":
+                b = mid
+            else:
+                a = mid
+        else:
+            if direction == "previous":
+                a = mid
+            else:
+                b = mid
+    return a + (b - a) / 2
+
+
+def previous_new_moon(d) -> datetime:
+    return _find_phase(d, 0, "previous")
+
+
+def next_new_moon(d) -> datetime:
+    return _find_phase(d, 0, "next")
+
+
+def previous_full_moon(d) -> datetime:
+    return _find_phase(d, 180, "previous")
+
+
+def next_full_moon(d) -> datetime:
+    return _find_phase(d, 180, "next")
+
+
+def previous_first_quarter_moon(d) -> datetime:
+    return _find_phase(d, 90, "previous")
+
+
+def next_first_quarter_moon(d) -> datetime:
+    return _find_phase(d, 90, "next")
+
+
+def previous_last_quarter_moon(d) -> datetime:
+    return _find_phase(d, 270, "previous")
+
+
+def next_last_quarter_moon(d) -> datetime:
+    return _find_phase(d, 270, "next")
+
+
+def moon_phase_percent(d) -> float:
+    """Moon phase as percentage (0=new, 100=full), matching ephem.Moon.phase."""
+    elong = _moon_sun_elongation(d)
+    # Phase percent: 0 at new (0°), 100 at full (180°)
+    return (1 - math.cos(math.radians(elong))) / 2 * 100
+
+
+def julian_date(d) -> float:
+    """Julian Date for a datetime, replacing ephem.julian_date."""
+    t = _to_skyfield_time(d)
+    return t.tt
+
+
+# ---------------------------------------------------------------------------
+# Utility functions unchanged from before
+# ---------------------------------------------------------------------------
+
+def get_zodiac_sign(lon_deg: float) -> str:
+    return ZODIAC_SIGNS[int(lon_deg % 360 / 30)]
+
+
+def today_local_date() -> date:
+    return datetime.now().astimezone().date()
+
+
+def yfinance_exclusive_end(base_date: date | None = None) -> str:
+    current_date = base_date or today_local_date()
+    return (current_date + timedelta(days=1)).isoformat()
 
 
 def apply_bh_correction(records: list[dict], p_key: str = "p_value", q_key: str = "q_value") -> list[dict]:

@@ -6,8 +6,6 @@ BTC x Астрология: Расширенный анализ V2
 """
 
 import duckdb
-import ephem
-import math
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -24,8 +22,11 @@ from astro_shared import (
     MODALITY_MAP,
     ZODIAC_SIGNS,
     apply_bh_correction,
-    ecliptic_lon_deg as _get_ecliptic_lon,
     get_zodiac_sign,
+    planet_lon_deg,
+    julian_date,
+    moon_phase_percent,
+    previous_new_moon, next_new_moon,
     is_retrograde as _is_retrograde,
     is_stationary as _is_stationary,
 )
@@ -35,11 +36,8 @@ def _get_lunar_node(d):
     """
     Средний лунный узел (Раху — восходящий).
     Кету = Раху + 180°.
-    PyEphem не имеет встроенных лунных узлов, используем формулу.
     """
-    # Средний восходящий узел Луны (приближённая формула)
-    # Epoch: J2000.0 = 2000 Jan 1.5 TT
-    jd = ephem.julian_date(d)
+    jd = julian_date(d)
     T = (jd - 2451545.0) / 36525.0  # столетия от J2000
 
     # Средняя долгота восходящего узла (градусы)
@@ -58,27 +56,29 @@ def _is_void_of_course(d):
     Упрощение: проверяем аспекты Луны с планетами в пределах
     остатка знака (до следующих 30° границы).
     """
-    moon = ephem.Moon(d)
-    moon_lon = _get_ecliptic_lon(moon)
+    if isinstance(d, datetime):
+        dt = d
+    else:
+        dt = d
+    moon_lon = planet_lon_deg("Луна", dt)
     # Градусы до конца текущего знака
     degrees_left = 30 - (moon_lon % 30)
 
     # Скорость Луны ~13°/день, проверяем планеты в этом диапазоне
-    planet_classes = [ephem.Sun, ephem.Mercury, ephem.Venus, ephem.Mars,
-                      ephem.Jupiter, ephem.Saturn]
+    planet_names = ["Солнце", "Меркурий", "Венера", "Марс",
+                    "Юпитер", "Сатурн"]
 
     aspect_angles = [0, 60, 90, 120, 180]
     orb = 3  # узкий орб для VoC
 
     for step in range(int(degrees_left)):
         # Проверяем каждый градус пути Луны до конца знака
-        check_d = ephem.Date(d + step / 13.0)  # ~1 градус = 1/13 дня
-        check_moon = ephem.Moon(check_d)
-        check_moon_lon = _get_ecliptic_lon(check_moon)
+        check_d = dt + timedelta(days=step / 13.0)  # ~1 градус = 1/13 дня
+        check_moon_lon = planet_lon_deg("Луна", check_d)
 
-        for pc in planet_classes:
-            planet_lon = _get_ecliptic_lon(pc(check_d))
-            diff = abs(check_moon_lon - planet_lon)
+        for pname in planet_names:
+            p_lon = planet_lon_deg(pname, check_d)
+            diff = abs(check_moon_lon - p_lon)
             if diff > 180:
                 diff = 360 - diff
             for angle in aspect_angles:
@@ -88,17 +88,22 @@ def _is_void_of_course(d):
     return True  # Нет аспектов до конца знака
 
 
-def _detect_ingress(planet_class, d, window_hours=12):
+def _detect_ingress(planet_name, d, window_hours=12):
     """
     Планета сменила знак в пределах ±window часов.
     Возвращает (bool, new_sign или None).
+    planet_name: string name like "Луна", "Марс" etc.
     """
-    d_before = ephem.Date(d - window_hours / 24.0)
-    d_after = ephem.Date(d + window_hours / 24.0)
+    if isinstance(d, datetime):
+        dt = d
+    else:
+        dt = d
+    d_before = dt - timedelta(hours=window_hours)
+    d_after = dt + timedelta(hours=window_hours)
 
-    sign_before = get_zodiac_sign(_get_ecliptic_lon(planet_class(d_before)))
-    sign_now = get_zodiac_sign(_get_ecliptic_lon(planet_class(d)))
-    sign_after = get_zodiac_sign(_get_ecliptic_lon(planet_class(d_after)))
+    sign_before = get_zodiac_sign(planet_lon_deg(planet_name, d_before))
+    sign_now = get_zodiac_sign(planet_lon_deg(planet_name, dt))
+    sign_after = get_zodiac_sign(planet_lon_deg(planet_name, d_after))
 
     if sign_before != sign_now:
         return True, sign_now
@@ -109,16 +114,15 @@ def _detect_ingress(planet_class, d, window_hours=12):
 
 def get_extended_astro(date):
     """Максимально полный астро-профиль."""
-    d = ephem.Date(date)
-    d_prev = ephem.Date(date - timedelta(days=1))
-    moon = ephem.Moon(d)
+    d = date
+    d_prev = date - timedelta(days=1)
 
     # === Фаза Луны ===
-    phase = moon.phase / 100.0
-    prev_new = ephem.previous_new_moon(d)
-    next_new = ephem.next_new_moon(d)
-    cycle_len = next_new - prev_new
-    position = (d - prev_new) / cycle_len
+    phase = moon_phase_percent(d) / 100.0
+    prev_new = previous_new_moon(d)
+    next_new = next_new_moon(d)
+    cycle_len = (next_new - prev_new).total_seconds()
+    position = (d - prev_new).total_seconds() / cycle_len if cycle_len else 0
 
     if position < 0.125 or position >= 0.875:
         quarter = "Новолуние"
@@ -132,19 +136,15 @@ def get_extended_astro(date):
     lunar_day = int(position * 29.5) + 1
 
     # === Позиции планет ===
-    moon_lon = _get_ecliptic_lon(moon)
+    moon_lon = planet_lon_deg("Луна", d)
     moon_sign = get_zodiac_sign(moon_lon)
 
     planet_data = {}
-    planet_classes = {
-        "Солнце": ephem.Sun, "Меркурий": ephem.Mercury, "Венера": ephem.Venus,
-        "Марс": ephem.Mars, "Юпитер": ephem.Jupiter, "Сатурн": ephem.Saturn,
-    }
+    planet_names = ["Солнце", "Меркурий", "Венера", "Марс", "Юпитер", "Сатурн"]
 
     bodies = {"Луна": moon_lon}
-    for name, cls in planet_classes.items():
-        body = cls(d)
-        lon = _get_ecliptic_lon(body)
+    for name in planet_names:
+        lon = planet_lon_deg(name, d)
         bodies[name] = lon
         sign = get_zodiac_sign(lon)
         planet_data[name] = {"lon": lon, "sign": sign}
@@ -174,19 +174,19 @@ def get_extended_astro(date):
 
     # === Ретроградность ===
     retros = {}
-    for name, cls in planet_classes.items():
+    for name in planet_names:
         if name == "Солнце":
             continue
-        retros[name] = _is_retrograde(cls, d, d_prev)
+        retros[name] = _is_retrograde(name, d, d_prev)
 
     retro_count = sum(retros.values())
 
     # === Стационарность ===
     stations = {}
-    for name, cls in planet_classes.items():
+    for name in planet_names:
         if name == "Солнце":
             continue
-        stations[name] = _is_stationary(cls, d)
+        stations[name] = _is_stationary(name, d)
     any_station = any(stations.values())
 
     # === Void of Course Moon ===
@@ -194,10 +194,10 @@ def get_extended_astro(date):
 
     # === Ингрессии ===
     ingresses = {}
-    for name, cls in planet_classes.items():
-        is_ingress, new_sign = _detect_ingress(cls, d, window_hours=12)
+    for name in planet_names:
+        is_ingress, new_sign = _detect_ingress(name, d, window_hours=12)
         ingresses[name] = is_ingress
-    moon_ingress, _ = _detect_ingress(ephem.Moon, d, window_hours=6)
+    moon_ingress, _ = _detect_ingress("Луна", d, window_hours=6)
     ingresses["Луна"] = moon_ingress
     any_ingress = any(ingresses.values())
 

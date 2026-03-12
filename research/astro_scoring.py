@@ -15,7 +15,6 @@ import duckdb
 from datetime import datetime, timedelta
 from functools import lru_cache
 
-import ephem
 import matplotlib
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -44,8 +43,14 @@ try:
         ELEMENT_MAP,
         MODALITY_MAP,
         apply_bh_correction,
-        ecliptic_lon_deg,
         get_zodiac_sign,
+        planet_lon_deg,
+        julian_date,
+        moon_phase_percent,
+        previous_new_moon, next_new_moon,
+        previous_full_moon, next_full_moon,
+        previous_first_quarter_moon, next_first_quarter_moon,
+        previous_last_quarter_moon, next_last_quarter_moon,
         is_retrograde,
         is_stationary,
         today_local_date,
@@ -57,8 +62,14 @@ except ImportError:
         ELEMENT_MAP,
         MODALITY_MAP,
         apply_bh_correction,
-        ecliptic_lon_deg,
         get_zodiac_sign,
+        planet_lon_deg,
+        julian_date,
+        moon_phase_percent,
+        previous_new_moon, next_new_moon,
+        previous_full_moon, next_full_moon,
+        previous_first_quarter_moon, next_first_quarter_moon,
+        previous_last_quarter_moon, next_last_quarter_moon,
         is_retrograde,
         is_stationary,
         today_local_date,
@@ -66,30 +77,30 @@ except ImportError:
 
 
 RETRO_PLANETS = {
-    "Меркурий": ephem.Mercury,
-    "Венера": ephem.Venus,
-    "Марс": ephem.Mars,
-    "Юпитер": ephem.Jupiter,
-    "Сатурн": ephem.Saturn,
-    "Уран": ephem.Uranus,
-    "Нептун": ephem.Neptune,
-    "Плутон": ephem.Pluto,
+    "Меркурий": "Меркурий",
+    "Венера": "Венера",
+    "Марс": "Марс",
+    "Юпитер": "Юпитер",
+    "Сатурн": "Сатурн",
+    "Уран": "Уран",
+    "Нептун": "Нептун",
+    "Плутон": "Плутон",
 }
 
 STATION_PLANETS = {
-    "Меркурий": ephem.Mercury,
-    "Венера": ephem.Venus,
-    "Марс": ephem.Mars,
-    "Юпитер": ephem.Jupiter,
-    "Сатурн": ephem.Saturn,
+    "Меркурий": "Меркурий",
+    "Венера": "Венера",
+    "Марс": "Марс",
+    "Юпитер": "Юпитер",
+    "Сатурн": "Сатурн",
 }
 
 SLOW_INGRESS_PLANETS = {
-    "Юпитер": ephem.Jupiter,
-    "Сатурн": ephem.Saturn,
-    "Уран": ephem.Uranus,
-    "Нептун": ephem.Neptune,
-    "Плутон": ephem.Pluto,
+    "Юпитер": "Юпитер",
+    "Сатурн": "Сатурн",
+    "Уран": "Уран",
+    "Нептун": "Нептун",
+    "Плутон": "Плутон",
 }
 
 REVERSAL_FEATURE_LABELS = {

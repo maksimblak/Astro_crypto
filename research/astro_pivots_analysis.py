@@ -5,8 +5,6 @@ BTC x Астрология: Анализ разворотных точек
 """
 
 import duckdb
-import ephem
-import math
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -18,12 +16,20 @@ import matplotlib.pyplot as plt
 try:
     from .astro_shared import (
         DB_PATH, ECLIPSE_DATES, ZODIAC_SIGNS, get_zodiac_sign,
+        planet_lon_deg,
+        moon_phase_percent,
+        previous_new_moon, next_new_moon,
+        previous_full_moon, next_full_moon,
         is_retrograde as _is_retrograde,
         is_stationary as _is_stationary,
     )
 except ImportError:
     from astro_shared import (
         DB_PATH, ECLIPSE_DATES, ZODIAC_SIGNS, get_zodiac_sign,
+        planet_lon_deg,
+        moon_phase_percent,
+        previous_new_moon, next_new_moon,
+        previous_full_moon, next_full_moon,
         is_retrograde as _is_retrograde,
         is_stationary as _is_stationary,
     )
@@ -33,12 +39,12 @@ END_DATE = "2026-03-11"
 EVENT_WINDOW_DAYS = 6
 
 
-def _nearest_station_days(planet_class, date, window_days=EVENT_WINDOW_DAYS):
+def _nearest_station_days(planet_name, date, window_days=EVENT_WINDOW_DAYS):
     """Ищет ближайшую станцию планеты в окне ±window_days."""
     nearest = None
     for offset in range(-window_days, window_days + 1):
-        check_date = ephem.Date(date + timedelta(days=offset))
-        if _is_stationary(planet_class, check_date):
+        check_date = date + timedelta(days=offset)
+        if _is_stationary(planet_name, check_date):
             dist = abs(offset)
             nearest = dist if nearest is None else min(nearest, dist)
     return nearest
@@ -46,19 +52,18 @@ def _nearest_station_days(planet_class, date, window_days=EVENT_WINDOW_DAYS):
 
 def get_astro_for_date(date):
     """Полный астро-профиль для конкретной даты."""
-    d = ephem.Date(date)
-    moon = ephem.Moon(d)
+    d = date
 
     # Фаза Луны
-    phase = moon.phase / 100.0
-    prev_new = ephem.previous_new_moon(d)
-    next_new = ephem.next_new_moon(d)
-    prev_full = ephem.previous_full_moon(d)
-    next_full = ephem.next_full_moon(d)
-    cycle_len = next_new - prev_new
-    position = (d - prev_new) / cycle_len
-    new_moon_days = min(abs(d - prev_new), abs(next_new - d))
-    full_moon_days = min(abs(d - prev_full), abs(next_full - d))
+    phase = moon_phase_percent(d) / 100.0
+    prev_new = previous_new_moon(d)
+    next_new = next_new_moon(d)
+    prev_full = previous_full_moon(d)
+    next_full = next_full_moon(d)
+    cycle_len = (next_new - prev_new).total_seconds()
+    position = (d - prev_new).total_seconds() / cycle_len if cycle_len else 0
+    new_moon_days = min(abs((d - prev_new).total_seconds()), abs((next_new - d).total_seconds())) / 86400.0
+    full_moon_days = min(abs((d - prev_full).total_seconds()), abs((next_full - d).total_seconds())) / 86400.0
 
     if position < 0.125 or position >= 0.875:
         quarter = "Новолуние"
@@ -70,30 +75,24 @@ def get_astro_for_date(date):
         quarter = "Убывающая"
 
     # Знак Луны
-    moon_lon = float(ephem.Ecliptic(moon).lon) * 180 / math.pi
+    moon_lon = planet_lon_deg("Луна", d)
     moon_sign = get_zodiac_sign(moon_lon)
 
     # Ретроградность планет
-    d_prev = ephem.Date(date - timedelta(days=1))
-    mercury_retro = _is_retrograde(ephem.Mercury, d, d_prev)
-    venus_retro = _is_retrograde(ephem.Venus, d, d_prev)
-    mars_retro = _is_retrograde(ephem.Mars, d, d_prev)
-    mercury_station_days = _nearest_station_days(ephem.Mercury, date)
-    venus_station_days = _nearest_station_days(ephem.Venus, date)
-    mars_station_days = _nearest_station_days(ephem.Mars, date)
+    d_prev = date - timedelta(days=1)
+    mercury_retro = _is_retrograde("Меркурий", d, d_prev)
+    venus_retro = _is_retrograde("Венера", d, d_prev)
+    mars_retro = _is_retrograde("Марс", d, d_prev)
+    mercury_station_days = _nearest_station_days("Меркурий", date)
+    venus_station_days = _nearest_station_days("Венера", date)
+    mars_station_days = _nearest_station_days("Марс", date)
 
     # Знаки планет
-    planets = {
-        "Солнце": ephem.Sun(d),
-        "Марс": ephem.Mars(d),
-        "Юпитер": ephem.Jupiter(d),
-        "Сатурн": ephem.Saturn(d),
-        "Венера": ephem.Venus(d),
-    }
+    planet_names_list = ["Солнце", "Марс", "Юпитер", "Сатурн", "Венера"]
     planet_signs = {}
     planet_lons = {}
-    for name, body in planets.items():
-        lon = float(ephem.Ecliptic(body).lon) * 180 / math.pi
+    for name in planet_names_list:
+        lon = planet_lon_deg(name, d)
         planet_signs[name] = get_zodiac_sign(lon)
         planet_lons[name] = lon
 

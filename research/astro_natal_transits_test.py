@@ -14,17 +14,16 @@ import math
 import duckdb
 from collections import Counter
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
-import ephem
 import numpy as np
 import pandas as pd
 from scipy import stats
 
 try:
-    from .astro_shared import DB_PATH, apply_bh_correction
+    from .astro_shared import DB_PATH, apply_bh_correction, planet_lon_deg
 except ImportError:
-    from astro_shared import DB_PATH, apply_bh_correction
+    from astro_shared import DB_PATH, apply_bh_correction, planet_lon_deg
 
 try:
     from .log import get_logger
@@ -46,22 +45,22 @@ DEFAULT_BIRTH_SPECS = [
 ]
 
 TRANSIT_BODIES = {
-    "Марс": ephem.Mars,
-    "Юпитер": ephem.Jupiter,
-    "Сатурн": ephem.Saturn,
-    "Уран": ephem.Uranus,
-    "Нептун": ephem.Neptune,
-    "Плутон": ephem.Pluto,
+    "Марс": "Марс",
+    "Юпитер": "Юпитер",
+    "Сатурн": "Сатурн",
+    "Уран": "Уран",
+    "Нептун": "Нептун",
+    "Плутон": "Плутон",
 }
 
 NATAL_BODIES = {
-    "Солнце": ephem.Sun,
-    "Луна": ephem.Moon,
-    "Меркурий": ephem.Mercury,
-    "Венера": ephem.Venus,
-    "Марс": ephem.Mars,
-    "Юпитер": ephem.Jupiter,
-    "Сатурн": ephem.Saturn,
+    "Солнце": "Солнце",
+    "Луна": "Луна",
+    "Меркурий": "Меркурий",
+    "Венера": "Венера",
+    "Марс": "Марс",
+    "Юпитер": "Юпитер",
+    "Сатурн": "Сатурн",
 }
 
 ASPECTS = {
@@ -101,15 +100,20 @@ def angular_distance_deg(a_deg: float, b_deg: float) -> float:
     return min(diff, 360.0 - diff)
 
 
-def longitude_deg(body_cls, when: datetime) -> float:
-    body = body_cls(ephem.Date(when))
-    return float(ephem.Ecliptic(body).lon) * 180.0 / math.pi
+def longitude_deg(body_name_or_cls, when: datetime) -> float:
+    if isinstance(body_name_or_cls, str):
+        return planet_lon_deg(body_name_or_cls, when)
+    # Backward compat: if a string key from TRANSIT_BODIES/NATAL_BODIES
+    return planet_lon_deg(body_name_or_cls, when)
 
 
-def is_retrograde(body_cls, when: datetime) -> bool:
-    dt = ephem.Date(when)
-    lon_before = longitude_deg(body_cls, ephem.Date(dt - 1).datetime())
-    lon_after = longitude_deg(body_cls, ephem.Date(dt + 1).datetime())
+def is_retrograde(body_name, when: datetime) -> bool:
+    if isinstance(body_name, str):
+        name = body_name
+    else:
+        name = body_name
+    lon_before = planet_lon_deg(name, when - timedelta(days=1))
+    lon_after = planet_lon_deg(name, when + timedelta(days=1))
     diff = (lon_after - lon_before) % 360.0
     return diff > 180.0
 
@@ -165,9 +169,9 @@ def build_transit_cache(
     for i, date in enumerate(dates):
         when = date.to_pydatetime()
         entry: dict[str, float | bool] = {}
-        for name, body_cls in TRANSIT_BODIES.items():
-            entry[name] = longitude_deg(body_cls, when)
-            entry[f"{name}_retro"] = is_retrograde(body_cls, when)
+        for name, body_name in TRANSIT_BODIES.items():
+            entry[name] = longitude_deg(body_name, when)
+            entry[f"{name}_retro"] = is_retrograde(body_name, when)
         cache[date] = entry
         if (i + 1) % 500 == 0:
             print(f"  transit cache: {i + 1}/{total}")
@@ -175,7 +179,7 @@ def build_transit_cache(
 
 
 def build_natal_positions(birth_dt: datetime) -> dict[str, float]:
-    return {name: longitude_deg(body_cls, birth_dt) for name, body_cls in NATAL_BODIES.items()}
+    return {name: longitude_deg(body_name, birth_dt) for name, body_name in NATAL_BODIES.items()}
 
 
 def build_feature_frame(

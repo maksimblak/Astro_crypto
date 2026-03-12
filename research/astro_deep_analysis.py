@@ -5,8 +5,6 @@ BTC x Астрология: Глубокий анализ корреляций
 """
 
 import duckdb
-import ephem
-import math
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -18,7 +16,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from astro_shared import (
     DB_PATH, ECLIPSES, ECLIPSE_DATES, ZODIAC_SIGNS,
-    apply_bh_correction, ecliptic_lon_deg, get_zodiac_sign,
+    apply_bh_correction, get_zodiac_sign,
+    planet_lon_deg,
+    moon_phase_percent,
+    previous_new_moon, next_new_moon,
     is_retrograde as _is_retrograde,
     is_stationary as _is_stationary,
 )
@@ -26,16 +27,15 @@ from astro_shared import (
 
 def get_full_astro(date):
     """Расширенный астро-профиль."""
-    d = ephem.Date(date)
-    d_prev = ephem.Date(date - timedelta(days=1))
-    moon = ephem.Moon(d)
+    d = date
+    d_prev = date - timedelta(days=1)
 
     # Фаза Луны
-    phase = moon.phase / 100.0
-    prev_new = ephem.previous_new_moon(d)
-    next_new = ephem.next_new_moon(d)
-    cycle_len = next_new - prev_new
-    position = (d - prev_new) / cycle_len
+    phase = moon_phase_percent(d) / 100.0
+    prev_new = previous_new_moon(d)
+    next_new = next_new_moon(d)
+    cycle_len = (next_new - prev_new).total_seconds()
+    position = (d - prev_new).total_seconds() / cycle_len if cycle_len else 0
 
     if position < 0.125 or position >= 0.875:
         quarter = "Новолуние"
@@ -49,33 +49,33 @@ def get_full_astro(date):
     # Лунный день (1-30)
     lunar_day = int(position * 29.5) + 1
 
-    moon_lon = float(ephem.Ecliptic(moon).lon) * 180 / math.pi
+    moon_lon = planet_lon_deg("Луна", d)
     moon_sign = get_zodiac_sign(moon_lon)
 
     # Ретроградность
-    mercury_retro = _is_retrograde(ephem.Mercury, d, d_prev)
-    venus_retro = _is_retrograde(ephem.Venus, d, d_prev)
-    mars_retro = _is_retrograde(ephem.Mars, d, d_prev)
-    jupiter_retro = _is_retrograde(ephem.Jupiter, d, d_prev)
-    saturn_retro = _is_retrograde(ephem.Saturn, d, d_prev)
+    mercury_retro = _is_retrograde("Меркурий", d, d_prev)
+    venus_retro = _is_retrograde("Венера", d, d_prev)
+    mars_retro = _is_retrograde("Марс", d, d_prev)
+    jupiter_retro = _is_retrograde("Юпитер", d, d_prev)
+    saturn_retro = _is_retrograde("Сатурн", d, d_prev)
 
     # Стационарность (±2 дня от смены направления)
-    mercury_station = _is_stationary(ephem.Mercury, d)
-    venus_station = _is_stationary(ephem.Venus, d)
-    mars_station = _is_stationary(ephem.Mars, d)
-    jupiter_station = _is_stationary(ephem.Jupiter, d)
-    saturn_station = _is_stationary(ephem.Saturn, d)
+    mercury_station = _is_stationary("Меркурий", d)
+    venus_station = _is_stationary("Венера", d)
+    mars_station = _is_stationary("Марс", d)
+    jupiter_station = _is_stationary("Юпитер", d)
+    saturn_station = _is_stationary("Сатурн", d)
     any_station = any([mercury_station, venus_station, mars_station, jupiter_station, saturn_station])
 
     # Позиции планет
     bodies = {
         "Луна": moon_lon,
-        "Солнце": float(ephem.Ecliptic(ephem.Sun(d)).lon) * 180 / math.pi,
-        "Меркурий": float(ephem.Ecliptic(ephem.Mercury(d)).lon) * 180 / math.pi,
-        "Венера": float(ephem.Ecliptic(ephem.Venus(d)).lon) * 180 / math.pi,
-        "Марс": float(ephem.Ecliptic(ephem.Mars(d)).lon) * 180 / math.pi,
-        "Юпитер": float(ephem.Ecliptic(ephem.Jupiter(d)).lon) * 180 / math.pi,
-        "Сатурн": float(ephem.Ecliptic(ephem.Saturn(d)).lon) * 180 / math.pi,
+        "Солнце": planet_lon_deg("Солнце", d),
+        "Меркурий": planet_lon_deg("Меркурий", d),
+        "Венера": planet_lon_deg("Венера", d),
+        "Марс": planet_lon_deg("Марс", d),
+        "Юпитер": planet_lon_deg("Юпитер", d),
+        "Сатурн": planet_lon_deg("Сатурн", d),
     }
 
     sun_sign = get_zodiac_sign(bodies["Солнце"])

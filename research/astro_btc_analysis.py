@@ -11,8 +11,6 @@ BTC x Астрология: Корреляционный анализ BTC
 """
 
 import duckdb
-import ephem
-import math
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -21,7 +19,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from astro_shared import DB_PATH, ZODIAC_SIGNS, get_zodiac_sign
+from astro_shared import (
+    DB_PATH, ZODIAC_SIGNS, get_zodiac_sign,
+    planet_lon_deg,
+    moon_phase_percent,
+    previous_new_moon, next_new_moon,
+    previous_full_moon, next_full_moon,
+)
 
 # ============================================================
 # 1. ЗАГРУЗКА ДАННЫХ BTC
@@ -49,21 +53,19 @@ def load_btc_data() -> pd.DataFrame:
 
 def compute_moon_phase(date) -> dict:
     """Вычисляет фазу Луны на дату."""
-    d = ephem.Date(date)
-    moon = ephem.Moon(d)
+    d = date
 
     # Фаза: 0 = новолуние, 0.5 = полнолуние
-    phase = moon.phase / 100.0  # ephem даёт 0-100
+    phase = moon_phase_percent(d) / 100.0
 
     # Ближайшие фазы
-    prev_new = ephem.previous_new_moon(d)
-    next_new = ephem.next_new_moon(d)
-    prev_full = ephem.previous_full_moon(d)
-    next_full = ephem.next_full_moon(d)
+    prev_new = previous_new_moon(d)
+    next_new = next_new_moon(d)
+    next_full = next_full_moon(d)
 
     # Определяем четверть
-    cycle_length = next_new - prev_new
-    position = (d - prev_new) / cycle_length
+    cycle_length = (next_new - prev_new).total_seconds()
+    position = (d - prev_new).total_seconds() / cycle_length if cycle_length else 0
 
     if position < 0.125 or position >= 0.875:
         quarter = "new_moon"
@@ -75,75 +77,55 @@ def compute_moon_phase(date) -> dict:
         quarter = "waning"  # убывающая
 
     # Знак Луны (эклиптическая долгота)
-    moon_lon = float(ephem.Ecliptic(moon).lon) * 180 / math.pi
+    moon_lon = planet_lon_deg("Луна", d)
     moon_sign = get_zodiac_sign(moon_lon)
+
+    days_to_new = (next_new - d).total_seconds() / 86400.0
+    days_to_full = (next_full - d).total_seconds() / 86400.0
 
     return {
         "moon_phase": round(phase, 4),
         "moon_quarter": quarter,
         "moon_sign": moon_sign,
-        "days_to_new": round(float(next_new - d), 2),
-        "days_to_full": round(float(next_full - d), 2),
+        "days_to_new": round(days_to_new, 2),
+        "days_to_full": round(days_to_full, 2),
     }
 
 
 def is_mercury_retrograde(date) -> bool:
     """Определяет ретроградность Меркурия."""
-    d = ephem.Date(date)
-    mercury = ephem.Mercury(d)
-
-    # Проверяем через разницу RA за 1 день
-    d_prev = ephem.Date(date - timedelta(days=1))
-    mercury_prev = ephem.Mercury(d_prev)
-
-    # Эклиптическая долгота
-    lon_now = float(ephem.Ecliptic(mercury).lon)
-    lon_prev = float(ephem.Ecliptic(mercury_prev).lon)
-
-    # Ретроградность = долгота уменьшается
-    diff = lon_now - lon_prev
-    # Учитываем переход через 0/2π
-    if diff > math.pi:
-        diff -= 2 * math.pi
-    elif diff < -math.pi:
-        diff += 2 * math.pi
-
-    return diff < 0
+    from astro_shared import is_retrograde
+    d_prev = date - timedelta(days=1)
+    return is_retrograde("Меркурий", date, d_prev)
 
 
 def get_planet_positions(date) -> dict:
     """Получает позиции основных планет."""
-    d = ephem.Date(date)
-    planets = {
-        "mars": ephem.Mars(d),
-        "jupiter": ephem.Jupiter(d),
-        "saturn": ephem.Saturn(d),
-        "venus": ephem.Venus(d),
+    planet_map = {
+        "mars": "Марс",
+        "jupiter": "Юпитер",
+        "saturn": "Сатурн",
+        "venus": "Венера",
     }
 
     positions = {}
-    for name, planet in planets.items():
-        lon = float(ephem.Ecliptic(planet).lon) * 180 / math.pi
-        positions[f"{name}_sign"] = get_zodiac_sign(lon)
-        positions[f"{name}_lon"] = round(lon, 2)
+    for eng_name, ru_name in planet_map.items():
+        lon = planet_lon_deg(ru_name, date)
+        positions[f"{eng_name}_sign"] = get_zodiac_sign(lon)
+        positions[f"{eng_name}_lon"] = round(lon, 2)
 
     return positions
 
 
 def compute_aspects(date) -> list[str]:
     """Находит значимые аспекты между планетами."""
-    d = ephem.Date(date)
-    bodies = {
-        "Mars": ephem.Mars(d),
-        "Jupiter": ephem.Jupiter(d),
-        "Saturn": ephem.Saturn(d),
-        "Venus": ephem.Venus(d),
-        "Mercury": ephem.Mercury(d),
-    }
+    planet_names = ["Mars", "Jupiter", "Saturn", "Venus", "Mercury"]
+    ru_names = {"Mars": "Марс", "Jupiter": "Юпитер", "Saturn": "Сатурн",
+                "Venus": "Венера", "Mercury": "Меркурий"}
 
     lons = {}
-    for name, body in bodies.items():
-        lons[name] = float(ephem.Ecliptic(body).lon) * 180 / math.pi
+    for name in planet_names:
+        lons[name] = planet_lon_deg(ru_names[name], date)
 
     # Аспекты: соединение (0°), секстиль (60°), квадратура (90°), трин (120°), оппозиция (180°)
     aspect_types = {
