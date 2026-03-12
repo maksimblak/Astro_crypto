@@ -25,7 +25,7 @@ export default function App() {
   }, [stats.data]);
 
   const referenceDate = today.data?.date || localDateKey();
-  const isLoading = today.isLoading && calendar.isLoading;
+  const isLoading = today.isLoading || calendar.isLoading;
 
   return (
     <>

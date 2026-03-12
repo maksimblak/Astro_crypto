@@ -3,11 +3,17 @@ import { Chart } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, LogarithmicScale, PointElement, LineElement,
+  BubbleController,
   Tooltip, Legend, Filler,
 } from 'chart.js';
+import type { ScriptableContext } from 'chart.js';
 import type { DailyPrice, PivotPoint } from '../../types/api';
 
-ChartJS.register(CategoryScale, LinearScale, LogarithmicScale, PointElement, LineElement, Tooltip, Legend, Filler);
+ChartJS.register(
+  CategoryScale, LinearScale, LogarithmicScale, PointElement, LineElement,
+  BubbleController,
+  Tooltip, Legend, Filler,
+);
 
 interface Props {
   daily: DailyPrice[];
@@ -34,6 +40,15 @@ export default function PriceChart({ daily, pivots }: Props) {
         type: 'line' as const,
         data: daily.map(d => d.close),
         borderColor: 'rgba(59,130,246,0.8)',
+        backgroundColor: (ctx: ScriptableContext<'line'>) => {
+          const chart = ctx.chart;
+          const { ctx: canvasCtx, chartArea } = chart;
+          if (!chartArea) return 'rgba(59,130,246,0.15)';
+          const g = canvasCtx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+          g.addColorStop(0, 'rgba(59,130,246,0.15)');
+          g.addColorStop(1, 'rgba(59,130,246,0)');
+          return g;
+        },
         borderWidth: 1.5,
         pointRadius: 0,
         fill: true,

@@ -1,6 +1,7 @@
 """Regime endpoint: /api/regime with TTL cache."""
 
 import sqlite3
+import threading
 
 from cachetools import TTLCache
 from fastapi import APIRouter, HTTPException
@@ -10,6 +11,7 @@ from backend.db import get_db
 router = APIRouter(tags=["regime"])
 
 _regime_cache: TTLCache = TTLCache(maxsize=1, ttl=300)
+_regime_lock = threading.Lock()
 
 _DESIRED_FEATURE_COLUMNS = [
     "amihud_illiquidity_20d", "amihud_z_90d", "range_compression_20d",
@@ -40,35 +42,35 @@ def _market_feature_select_sql(conn: sqlite3.Connection) -> str:
 
 @router.get("/regime")
 def api_regime():
-    cached = _regime_cache.get("regime")
+    with _regime_lock:
+        cached = _regime_cache.get("regime")
     if cached is not None:
         return cached
 
     from market_regime import build_regime_payload
 
-    conn = get_db()
-    try:
-        feature_select = _market_feature_select_sql(conn)
-        rows = conn.execute(
-            "SELECT d.date, d.open, d.high, d.low, d.close, d.volume"
-            + feature_select
-            + " FROM btc_daily d"
-            " LEFT JOIN btc_market_features f ON f.date = d.date"
-            " ORDER BY d.date"
-        ).fetchall()
-    except sqlite3.OperationalError:
+    with get_db() as conn:
         try:
+            feature_select = _market_feature_select_sql(conn)
             rows = conn.execute(
-                "SELECT date, open, high, low, close, volume FROM btc_daily ORDER BY date"
+                "SELECT d.date, d.open, d.high, d.low, d.close, d.volume"
+                + feature_select
+                + " FROM btc_daily d"
+                " LEFT JOIN btc_market_features f ON f.date = d.date"
+                " ORDER BY d.date"
             ).fetchall()
         except sqlite3.OperationalError:
-            conn.close()
-            raise HTTPException(404, "Table btc_daily not found. Run research/main.py first.")
+            try:
+                rows = conn.execute(
+                    "SELECT date, open, high, low, close, volume FROM btc_daily ORDER BY date"
+                ).fetchall()
+            except sqlite3.OperationalError:
+                raise HTTPException(404, "Table btc_daily not found. Run research/main.py first.")
 
-    conn.close()
     if not rows:
         raise HTTPException(404, "No market data found in btc_daily.")
 
     result = build_regime_payload(rows)
-    _regime_cache["regime"] = result
+    with _regime_lock:
+        _regime_cache["regime"] = result
     return result

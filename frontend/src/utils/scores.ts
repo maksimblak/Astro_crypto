@@ -4,10 +4,10 @@ let thresholds: ScoreScale = { cool: 0.5, warm: 1.0, hot: 1.5, extreme: 2.0 };
 
 export function setScoreThresholds(scale: ScoreScale) {
   thresholds = {
-    cool: Number(scale.cool) || thresholds.cool,
-    warm: Number(scale.warm) || thresholds.warm,
-    hot: Number(scale.hot) || thresholds.hot,
-    extreme: Number(scale.extreme) || thresholds.extreme,
+    cool: scale.cool != null ? Number(scale.cool) : thresholds.cool,
+    warm: scale.warm != null ? Number(scale.warm) : thresholds.warm,
+    hot: scale.hot != null ? Number(scale.hot) : thresholds.hot,
+    extreme: scale.extreme != null ? Number(scale.extreme) : thresholds.extreme,
   };
 }
 
