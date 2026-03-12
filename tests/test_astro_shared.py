@@ -1,9 +1,8 @@
 """Unit tests for research/astro_shared.py — core astro utilities."""
 
 import math
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
-import ephem
 import pytest
 
 import sys, os
@@ -11,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "research"))
 
 from astro_shared import (
     apply_bh_correction,
-    ecliptic_lon_deg,
+    planet_lon_deg,
     get_zodiac_sign,
     is_retrograde,
     is_stationary,
@@ -47,42 +46,40 @@ class TestGetZodiacSign:
         assert get_zodiac_sign(float(deg)) == expected
 
 
-class TestEclipticLonDeg:
+class TestPlanetLonDeg:
     def test_returns_float(self):
-        body = ephem.Sun(ephem.Date("2024/1/1"))
-        result = ecliptic_lon_deg(body)
+        result = planet_lon_deg("Солнце", datetime(2024, 1, 1))
         assert isinstance(result, float)
 
     def test_range_0_360(self):
-        body = ephem.Mars(ephem.Date("2023/6/15"))
-        result = ecliptic_lon_deg(body)
+        result = planet_lon_deg("Марс", datetime(2023, 6, 15))
         assert 0.0 <= result < 360.0
 
 
 class TestIsRetrograde:
     def test_mars_retrograde_2024(self):
         # Mars was retrograde around Dec 2024
-        d_now = ephem.Date("2024/12/10")
-        d_prev = ephem.Date("2024/12/9")
-        result = is_retrograde(ephem.Mars, d_now, d_prev)
+        d_now = datetime(2024, 12, 10)
+        d_prev = datetime(2024, 12, 9)
+        result = is_retrograde("Марс", d_now, d_prev)
         assert isinstance(result, bool)
 
     def test_sun_never_retrograde(self):
-        d_now = ephem.Date("2024/6/15")
-        d_prev = ephem.Date("2024/6/14")
-        assert is_retrograde(ephem.Sun, d_now, d_prev) is False
+        d_now = datetime(2024, 6, 15)
+        d_prev = datetime(2024, 6, 14)
+        assert is_retrograde("Солнце", d_now, d_prev) is False
 
 
 class TestIsStationary:
     def test_returns_bool(self):
-        d = ephem.Date("2024/6/15")
-        result = is_stationary(ephem.Jupiter, d, orb_days=2)
+        d = datetime(2024, 6, 15)
+        result = is_stationary("Юпитер", d, orb_days=2)
         assert isinstance(result, bool)
 
     def test_fast_planet_rarely_stationary(self):
         # Sun is never stationary
-        d = ephem.Date("2024/3/20")
-        assert is_stationary(ephem.Sun, d) is False
+        d = datetime(2024, 3, 20)
+        assert is_stationary("Солнце", d) is False
 
 
 class TestApplyBhCorrection:

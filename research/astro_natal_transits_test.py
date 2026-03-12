@@ -115,7 +115,7 @@ def is_retrograde(body_name, when: datetime) -> bool:
     lon_before = planet_lon_deg(name, when - timedelta(days=1))
     lon_after = planet_lon_deg(name, when + timedelta(days=1))
     diff = (lon_after - lon_before) % 360.0
-    return diff > 180.0
+    return bool(diff > 180.0)
 
 
 def parse_birth_specs(specs: list[str]) -> list[tuple[str, datetime]]:

@@ -3,7 +3,6 @@
 import math
 from datetime import datetime
 
-import ephem
 import pytest
 
 import sys, os
@@ -52,17 +51,17 @@ class TestAngularDistanceDeg:
 
 class TestLongitudeDeg:
     def test_returns_float(self):
-        result = longitude_deg(ephem.Sun, datetime(2024, 6, 21))
+        result = longitude_deg("Солнце", datetime(2024, 6, 21))
         assert isinstance(result, float)
 
     def test_range(self):
-        result = longitude_deg(ephem.Mars, datetime(2024, 1, 15))
+        result = longitude_deg("Марс", datetime(2024, 1, 15))
         assert 0.0 <= result < 360.0
 
 
 class TestIsRetrograde:
     def test_returns_bool(self):
-        result = is_retrograde(ephem.Jupiter, datetime(2024, 6, 15))
+        result = is_retrograde("Юпитер", datetime(2024, 6, 15))
         assert isinstance(result, bool)
 
 

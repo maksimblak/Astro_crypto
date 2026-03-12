@@ -154,7 +154,7 @@ def is_retrograde(planet_name: str, d_now, d_prev) -> bool:
         diff -= 360
     elif diff < -180:
         diff += 360
-    return diff < 0
+    return bool(diff < 0)
 
 
 def is_stationary(planet_name: str, d_now, orb_days: int = 2) -> bool:
@@ -181,7 +181,7 @@ def is_stationary(planet_name: str, d_now, orb_days: int = 2) -> bool:
 
     d1 = _norm(lon_now, lon_before)
     d2 = _norm(lon_after, lon_now)
-    return (d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)
+    return bool((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0))
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 BTC Астро-скоринг: честная train/holdout-модель для разворотов.
 
 Подход:
-1. Считаем только реальные астрономические признаки через ephem.
+1. Считаем только реальные астрономические признаки через Skyfield.
 2. Обучаем веса признаков только на train-части истории.
 3. Проверяем на holdout без ручных подгонок.
 4. После валидации переобучаемся на полной истории для будущего календаря.
@@ -140,8 +140,7 @@ DIRECTION_FEATURE_LABELS = {
 
 @lru_cache(maxsize=None)
 def _planet_lon_for_ordinal(planet_name: str, ordinal: int) -> float:
-    planet_class = RETRO_PLANETS[planet_name]
-    return _get_ecliptic_lon(planet_class(ephem.Date(datetime.fromordinal(ordinal))))
+    return planet_lon_deg(planet_name, datetime.fromordinal(ordinal))
 
 
 @lru_cache(maxsize=None)
@@ -161,26 +160,29 @@ def _angular_distance_deg(lon_a: float, lon_b: float) -> float:
     return diff if diff <= 180 else 360 - diff
 
 
-# _is_retrograde, _is_stationary, _get_ecliptic_lon → astro_shared
-_get_ecliptic_lon = ecliptic_lon_deg
+# _is_retrograde, _is_stationary → astro_shared
 _is_retrograde = is_retrograde
 _is_stationary = is_stationary
 
 
 def _get_lunar_node(d):
-    jd = ephem.julian_date(d)
+    jd = julian_date(d)
     t = (jd - 2451545.0) / 36525.0
     omega = 125.04452 - 1934.136261 * t + 0.0020708 * t**2 + t**3 / 450000
     omega = omega % 360
     return omega if omega >= 0 else omega + 360
 
 
-def _detect_ingress(planet_class, d, window_hours=12):
-    d_before = ephem.Date(d - window_hours / 24.0)
-    d_after = ephem.Date(d + window_hours / 24.0)
-    sign_before = get_zodiac_sign(_get_ecliptic_lon(planet_class(d_before)))
-    sign_now = get_zodiac_sign(_get_ecliptic_lon(planet_class(d)))
-    sign_after = get_zodiac_sign(_get_ecliptic_lon(planet_class(d_after)))
+def _detect_ingress(planet_name, d, window_hours=12):
+    if isinstance(d, datetime):
+        dt = d
+    else:
+        dt = d
+    d_before = dt - timedelta(hours=window_hours)
+    d_after = dt + timedelta(hours=window_hours)
+    sign_before = get_zodiac_sign(planet_lon_deg(planet_name, d_before))
+    sign_now = get_zodiac_sign(planet_lon_deg(planet_name, dt))
+    sign_after = get_zodiac_sign(planet_lon_deg(planet_name, d_after))
     if sign_before != sign_now:
         return True, sign_now
     if sign_now != sign_after:
@@ -189,30 +191,30 @@ def _detect_ingress(planet_class, d, window_hours=12):
 
 
 def _days_to_nearest_phase(d):
-    prev_new = ephem.previous_new_moon(d)
-    next_new = ephem.next_new_moon(d)
-    prev_full = ephem.previous_full_moon(d)
-    next_full = ephem.next_full_moon(d)
-    dist_new = min(abs(d - prev_new), abs(next_new - d))
-    dist_full = min(abs(d - prev_full), abs(next_full - d))
-    return float(dist_new), float(dist_full)
+    prev_new = previous_new_moon(d)
+    next_new = next_new_moon(d)
+    prev_full = previous_full_moon(d)
+    next_full = next_full_moon(d)
+    dist_new = min(abs((d - prev_new).total_seconds()), abs((next_new - d).total_seconds())) / 86400.0
+    dist_full = min(abs((d - prev_full).total_seconds()), abs((next_full - d).total_seconds())) / 86400.0
+    return dist_new, dist_full
 
 
 def _quarter_distance(d):
-    prev_fq = ephem.previous_first_quarter_moon(d)
-    next_fq = ephem.next_first_quarter_moon(d)
-    prev_lq = ephem.previous_last_quarter_moon(d)
-    next_lq = ephem.next_last_quarter_moon(d)
-    dist_fq = min(abs(d - prev_fq), abs(next_fq - d))
-    dist_lq = min(abs(d - prev_lq), abs(next_lq - d))
-    return float(min(dist_fq, dist_lq))
+    prev_fq = previous_first_quarter_moon(d)
+    next_fq = next_first_quarter_moon(d)
+    prev_lq = previous_last_quarter_moon(d)
+    next_lq = next_last_quarter_moon(d)
+    dist_fq = min(abs((d - prev_fq).total_seconds()), abs((next_fq - d).total_seconds())) / 86400.0
+    dist_lq = min(abs((d - prev_lq).total_seconds()), abs((next_lq - d).total_seconds())) / 86400.0
+    return min(dist_fq, dist_lq)
 
 
 def _classify_quarter(d):
-    prev_new = ephem.previous_new_moon(d)
-    next_new = ephem.next_new_moon(d)
-    cycle_len = next_new - prev_new
-    position = (d - prev_new) / cycle_len
+    prev_new = previous_new_moon(d)
+    next_new = next_new_moon(d)
+    cycle_len = (next_new - prev_new).total_seconds()
+    position = (d - prev_new).total_seconds() / cycle_len if cycle_len else 0
     if position < 0.125 or position >= 0.875:
         return "Новолуние"
     if position < 0.375:
@@ -226,9 +228,8 @@ def _station_event_strength(planet_name: str, ordinal: int) -> float:
     if planet_name not in STATION_PLANETS:
         return 0.0
 
-    planet_class = STATION_PLANETS[planet_name]
-    check_date = ephem.Date(datetime.fromordinal(ordinal))
-    if not _is_stationary(planet_class, check_date, orb_days=1):
+    check_date = datetime.fromordinal(ordinal)
+    if not _is_stationary(planet_name, check_date, orb_days=1):
         return 0.0
 
     speed_before = abs(_planet_speed_for_ordinal(planet_name, ordinal))
@@ -255,11 +256,10 @@ def extract_astro_profile(date, eclipse_dates=None):
     """Астро-профиль для даты. eclipse_dates ограничивает список затмений (фикс data leakage)."""
     if eclipse_dates is None:
         eclipse_dates = ECLIPSE_DATES
-    d = ephem.Date(date)
-    d_prev = ephem.Date(date - timedelta(days=1))
-    moon = ephem.Moon(d)
+    d = date
+    d_prev = date - timedelta(days=1)
 
-    moon_lon = _get_ecliptic_lon(moon)
+    moon_lon = planet_lon_deg("Луна", d)
     moon_sign = get_zodiac_sign(moon_lon)
     moon_element = ELEMENT_MAP[moon_sign]
     moon_modality = MODALITY_MAP[moon_sign]
@@ -267,25 +267,25 @@ def extract_astro_profile(date, eclipse_dates=None):
     dist_new, dist_full = _days_to_nearest_phase(d)
     dist_quarter = _quarter_distance(d)
     quarter = _classify_quarter(d)
-    prev_new = ephem.previous_new_moon(d)
-    next_new = ephem.next_new_moon(d)
-    cycle_len = next_new - prev_new
-    moon_cycle_pos = float((d - prev_new) / cycle_len)
+    prev_new = previous_new_moon(d)
+    next_new = next_new_moon(d)
+    cycle_len = (next_new - prev_new).total_seconds()
+    moon_cycle_pos = (d - prev_new).total_seconds() / cycle_len if cycle_len else 0
     moon_cycle_angle = 2 * math.pi * moon_cycle_pos
 
     if eclipse_dates:
         min_eclipse = min(abs((date - ed).days) for ed in eclipse_dates)
     else:
         min_eclipse = 999
-    moon_ingress, new_sign = _detect_ingress(ephem.Moon, d, window_hours=6)
+    moon_ingress, new_sign = _detect_ingress("Луна", d, window_hours=6)
     station_strength = _station_strength(date)
 
-    retro_planets = [name for name, cls in RETRO_PLANETS.items() if _is_retrograde(cls, d, d_prev)]
-    station_planets = [name for name, cls in STATION_PLANETS.items() if _is_stationary(cls, d)]
+    retro_planets = [name for name in RETRO_PLANETS if _is_retrograde(name, d, d_prev)]
+    station_planets = [name for name in STATION_PLANETS if _is_stationary(name, d)]
 
     slow_ingresses = []
-    for name, cls in SLOW_INGRESS_PLANETS.items():
-        is_ingress, ingress_sign = _detect_ingress(cls, d, window_hours=24)
+    for name in SLOW_INGRESS_PLANETS:
+        is_ingress, ingress_sign = _detect_ingress(name, d, window_hours=24)
         if is_ingress:
             slow_ingresses.append(f"{name} -> {ingress_sign}")
 
@@ -293,16 +293,16 @@ def extract_astro_profile(date, eclipse_dates=None):
     ketu_lon = (rahu_lon + 180) % 360
     moon_rahu = _angular_distance_deg(moon_lon, rahu_lon)
     moon_ketu = _angular_distance_deg(moon_lon, ketu_lon)
-    saturn_lon = _get_ecliptic_lon(ephem.Saturn(d))
+    saturn_lon = planet_lon_deg("Сатурн", d)
     saturn_rahu = _angular_distance_deg(saturn_lon, rahu_lon)
 
     bodies = {
         "Луна": moon_lon,
-        "Солнце": _get_ecliptic_lon(ephem.Sun(d)),
-        "Меркурий": _get_ecliptic_lon(ephem.Mercury(d)),
-        "Венера": _get_ecliptic_lon(ephem.Venus(d)),
-        "Марс": _get_ecliptic_lon(ephem.Mars(d)),
-        "Юпитер": _get_ecliptic_lon(ephem.Jupiter(d)),
+        "Солнце": planet_lon_deg("Солнце", d),
+        "Меркурий": planet_lon_deg("Меркурий", d),
+        "Венера": planet_lon_deg("Венера", d),
+        "Марс": planet_lon_deg("Марс", d),
+        "Юпитер": planet_lon_deg("Юпитер", d),
         "Сатурн": saturn_lon,
     }
 
