@@ -22,6 +22,12 @@ HTTP_TIMEOUT = 30
 HTTP_HEADERS = {
     "User-Agent": "AstroBTC/1.0 (market feature pipeline)",
 }
+PRESERVED_RAW_FEATURE_COLUMNS = [
+    "wiki_views",
+    "fear_greed_value",
+    "unique_addresses",
+    "tx_count",
+]
 MARKET_FEATURE_COLUMNS = {
     "date": "TEXT PRIMARY KEY",
     "dollar_volume": "REAL",
@@ -88,6 +94,47 @@ def _rolling_z(series: pd.Series, window: int, min_periods: int) -> pd.Series:
 
 def _empty_frame() -> pd.DataFrame:
     return pd.DataFrame({"date": pd.Series(dtype="object")})
+
+
+def _load_existing_feature_snapshot(start_date: str, end_date: str) -> pd.DataFrame:
+    query = (
+        "SELECT date, wiki_views, fear_greed_value, unique_addresses, tx_count "
+        "FROM btc_market_features WHERE date >= ? AND date <= ? ORDER BY date"
+    )
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df = pd.read_sql_query(query, conn, params=[start_date, end_date])
+    except Exception:
+        return _empty_frame()
+    finally:
+        conn.close()
+    if df.empty:
+        return _empty_frame()
+    return df
+
+
+def _load_derivatives_history_from_db(start_date: str, end_date: str) -> pd.DataFrame:
+    query = (
+        "SELECT date, source, funding_rate_daily, open_interest_value, "
+        "perp_premium_daily, source_version "
+        "FROM btc_derivatives_history WHERE date >= ? AND date <= ? ORDER BY date, source"
+    )
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        return pd.read_sql_query(query, conn, params=[start_date, end_date])
+    except Exception:
+        return pd.DataFrame(
+            columns=[
+                "date",
+                "source",
+                "funding_rate_daily",
+                "open_interest_value",
+                "perp_premium_daily",
+                "source_version",
+            ]
+        )
+    finally:
+        conn.close()
 
 
 def _fetch_wikipedia_views(session: requests.Session, start_date: str, end_date: str) -> pd.DataFrame:
@@ -232,7 +279,26 @@ def build_market_features(df_ohlcv: pd.DataFrame) -> tuple[pd.DataFrame, pd.Data
     for frame in fetch_non_derivative_frames(start_date, end_date):
         base_dates = base_dates.merge(frame.reset_index(drop=True), on="date", how="left")
 
+    existing_feature_snapshot = _load_existing_feature_snapshot(start_date, end_date)
+    if not existing_feature_snapshot.empty:
+        base_dates = base_dates.merge(existing_feature_snapshot, on="date", how="left", suffixes=("", "_stored"))
+        for column in PRESERVED_RAW_FEATURE_COLUMNS:
+            stored_column = f"{column}_stored"
+            if stored_column in base_dates.columns:
+                base_dates[column] = base_dates[column].combine_first(base_dates[stored_column])
+                base_dates = base_dates.drop(columns=[stored_column])
+
     derivatives_history_df = fetch_derivatives_history(start_date, end_date)
+    stored_derivatives_history_df = _load_derivatives_history_from_db(start_date, end_date)
+    if not stored_derivatives_history_df.empty:
+        frames = [stored_derivatives_history_df]
+        if not derivatives_history_df.empty:
+            frames.append(derivatives_history_df)
+        derivatives_history_df = (
+            pd.concat(frames, ignore_index=True, sort=False)
+            .sort_values(["date", "source"])
+            .drop_duplicates(["date", "source"], keep="last")
+        )
     derivatives_features_df = aggregate_derivatives_history(derivatives_history_df, base_dates["date"])
     if not derivatives_features_df.empty:
         base_dates = base_dates.merge(derivatives_features_df, on="date", how="left")
