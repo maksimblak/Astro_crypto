@@ -9,10 +9,11 @@ BTC x natal astrology: проверка теории натальной карт
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sqlite3
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 
 import ephem
@@ -36,6 +37,9 @@ TRANSIT_BODIES = {
     "Марс": ephem.Mars,
     "Юпитер": ephem.Jupiter,
     "Сатурн": ephem.Saturn,
+    "Уран": ephem.Uranus,
+    "Нептун": ephem.Neptune,
+    "Плутон": ephem.Pluto,
 }
 
 NATAL_BODIES = {
@@ -50,9 +54,20 @@ NATAL_BODIES = {
 
 ASPECTS = {
     "соединение": 0.0,
+    "секстиль": 60.0,
     "квадрат": 90.0,
     "трин": 120.0,
+    "квинконс": 150.0,
     "оппозиция": 180.0,
+}
+
+ASPECT_ORB_RATIOS: dict[str, float] = {
+    "соединение": 2.67,
+    "секстиль": 1.33,
+    "квадрат": 2.0,
+    "трин": 2.0,
+    "квинконс": 0.83,
+    "оппозиция": 2.67,
 }
 
 
@@ -65,6 +80,7 @@ class CandidateResult:
     pivot_hit_mean: float
     baseline_hit_mean: float
     mw_p_value: float
+    mw_q_value: float | None
     key_feature_rows: list[dict]
 
 
@@ -76,6 +92,14 @@ def angular_distance_deg(a_deg: float, b_deg: float) -> float:
 def longitude_deg(body_cls, when: datetime) -> float:
     body = body_cls(ephem.Date(when))
     return float(ephem.Ecliptic(body).lon) * 180.0 / math.pi
+
+
+def is_retrograde(body_cls, when: datetime) -> bool:
+    dt = ephem.Date(when)
+    lon_before = longitude_deg(body_cls, ephem.Date(dt - 1).datetime())
+    lon_after = longitude_deg(body_cls, ephem.Date(dt + 1).datetime())
+    diff = (lon_after - lon_before) % 360.0
+    return diff > 180.0
 
 
 def parse_birth_specs(specs: list[str]) -> list[tuple[str, datetime]]:
@@ -90,8 +114,6 @@ def parse_birth_specs(specs: list[str]) -> list[tuple[str, datetime]]:
 
 
 def load_market_data(start: str | None, end: str | None) -> tuple[pd.DataFrame, set[pd.Timestamp]]:
-    conn = sqlite3.connect(DB_PATH)
-
     daily_query = "SELECT date, close FROM btc_daily"
     pivots_query = "SELECT date FROM btc_pivots"
     params = []
@@ -112,9 +134,9 @@ def load_market_data(start: str | None, end: str | None) -> tuple[pd.DataFrame, 
     daily_query += " ORDER BY date"
     pivots_query += " ORDER BY date"
 
-    daily_df = pd.read_sql(daily_query, conn, params=params)
-    pivots_df = pd.read_sql(pivots_query, conn, params=params)
-    conn.close()
+    with sqlite3.connect(DB_PATH) as conn:
+        daily_df = pd.read_sql(daily_query, conn, params=params)
+        pivots_df = pd.read_sql(pivots_query, conn, params=params)
 
     daily_df["date"] = pd.to_datetime(daily_df["date"])
     pivots_df["date"] = pd.to_datetime(pivots_df["date"])
@@ -122,13 +144,21 @@ def load_market_data(start: str | None, end: str | None) -> tuple[pd.DataFrame, 
     return daily_df, pivot_dates
 
 
-def build_transit_cache(daily_df: pd.DataFrame) -> dict[pd.Timestamp, dict[str, float]]:
-    cache = {}
-    for idx, row in daily_df.iterrows():
-        when = row["date"].to_pydatetime()
-        cache[row["date"]] = {name: longitude_deg(body_cls, when) for name, body_cls in TRANSIT_BODIES.items()}
-        if (idx + 1) % 500 == 0:
-            print(f"  transit cache: {idx + 1}/{len(daily_df)}")
+def build_transit_cache(
+    daily_df: pd.DataFrame,
+) -> dict[pd.Timestamp, dict[str, float | bool]]:
+    cache: dict[pd.Timestamp, dict[str, float | bool]] = {}
+    dates = daily_df["date"].tolist()
+    total = len(dates)
+    for i, date in enumerate(dates):
+        when = date.to_pydatetime()
+        entry: dict[str, float | bool] = {}
+        for name, body_cls in TRANSIT_BODIES.items():
+            entry[name] = longitude_deg(body_cls, when)
+            entry[f"{name}_retro"] = is_retrograde(body_cls, when)
+        cache[date] = entry
+        if (i + 1) % 500 == 0:
+            print(f"  transit cache: {i + 1}/{total}")
     return cache
 
 
@@ -139,33 +169,45 @@ def build_natal_positions(birth_dt: datetime) -> dict[str, float]:
 def build_feature_frame(
     daily_df: pd.DataFrame,
     pivot_dates: set[pd.Timestamp],
-    transit_cache: dict[pd.Timestamp, dict[str, float]],
+    transit_cache: dict[pd.Timestamp, dict[str, float | bool]],
     natal_positions: dict[str, float],
     orb_deg: float,
 ) -> pd.DataFrame:
+    natal_aspect_pairs = [
+        (natal_name, natal_lon, aspect_name, target_angle, orb_deg * ASPECT_ORB_RATIOS.get(aspect_name, 1.0))
+        for natal_name, natal_lon in natal_positions.items()
+        for aspect_name, target_angle in ASPECTS.items()
+    ]
+
+    transit_names = [n for n in TRANSIT_BODIES]
+    dates = daily_df["date"].tolist()
+    closes = daily_df["close"].tolist()
+    total = len(dates)
     rows = []
-    for idx, row in daily_df.iterrows():
-        date = row["date"]
-        transit_positions = transit_cache[date]
+
+    for i, (date, close) in enumerate(zip(dates, closes)):
+        entry = transit_cache[date]
         features = []
 
-        for transit_name, transit_lon in transit_positions.items():
-            for natal_name, natal_lon in natal_positions.items():
+        for transit_name in transit_names:
+            transit_lon = entry[transit_name]
+            retro = entry[f"{transit_name}_retro"]
+            retro_tag = " R" if retro else ""
+
+            for natal_name, natal_lon, aspect_name, target_angle, aspect_orb in natal_aspect_pairs:
                 distance = angular_distance_deg(transit_lon, natal_lon)
-                for aspect_name, target_angle in ASPECTS.items():
-                    orb = abs(distance - target_angle)
-                    if orb <= orb_deg:
-                        features.append(f"{transit_name}→нат.{natal_name} {aspect_name}")
+                if abs(distance - target_angle) <= aspect_orb:
+                    features.append(f"{transit_name}→нат.{natal_name} {aspect_name}{retro_tag}")
 
         saturn_saturn_orb = min(
-            abs(angular_distance_deg(transit_positions["Сатурн"], natal_positions["Сатурн"]) - angle)
+            abs(angular_distance_deg(entry["Сатурн"], natal_positions["Сатурн"]) - angle)
             for angle in ASPECTS.values()
         )
 
         rows.append(
             {
                 "date": date,
-                "close": row["close"],
+                "close": close,
                 "is_pivot": date in pivot_dates,
                 "natal_hit_count": len(features),
                 "saturn_to_natal_saturn_orb": round(saturn_saturn_orb, 3),
@@ -173,8 +215,8 @@ def build_feature_frame(
             }
         )
 
-        if (idx + 1) % 750 == 0:
-            print(f"  natal features: {idx + 1}/{len(daily_df)}")
+        if (i + 1) % 750 == 0:
+            print(f"  natal features: {i + 1}/{total}")
 
     return pd.DataFrame(rows)
 
@@ -221,7 +263,7 @@ def run_candidate(
     birth_dt: datetime,
     daily_df: pd.DataFrame,
     pivot_dates: set[pd.Timestamp],
-    transit_cache: dict[pd.Timestamp, dict[str, float]],
+    transit_cache: dict[pd.Timestamp, dict[str, float | bool]],
     orb_deg: float,
     min_support: int,
     top_n: int,
@@ -262,13 +304,13 @@ def run_candidate(
     if not rows:
         print("    Нет признаков с достаточной частотой.")
     else:
-        print(f"    {'Признак':<38} {'Pivot%':>8} {'Base%':>8} {'Lift':>8} {'p':>8} {'q':>8}")
+        print(f"    {'Признак':<45} {'Pivot%':>8} {'Base%':>8} {'Lift':>8} {'p':>8} {'q':>8}")
         for item in rows:
             q_value = item.get("q_value")
             q_text = f"{q_value:.4f}" if isinstance(q_value, float) else "—"
             lift_text = f"{item['lift']:.2f}" if item["lift"] is not None else "inf"
             print(
-                f"    {item['feature']:<38} {item['pivot_pct']:>7.1f}% {item['baseline_pct']:>7.1f}% "
+                f"    {item['feature']:<45} {item['pivot_pct']:>7.1f}% {item['baseline_pct']:>7.1f}% "
                 f"{lift_text:>8} {item['p_value']:>8.4f} {q_text:>8}"
             )
 
@@ -280,6 +322,7 @@ def run_candidate(
         pivot_hit_mean=float(pivots["natal_hit_count"].mean()),
         baseline_hit_mean=float(baseline["natal_hit_count"].mean()),
         mw_p_value=float(mw_p),
+        mw_q_value=None,
         key_feature_rows=rows,
     )
 
@@ -300,6 +343,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--orb", type=float, default=3.0, help="Орб для аспектов к наталу в градусах")
     parser.add_argument("--min-support", type=int, default=4, help="Минимум pivot-попаданий для вывода признака")
     parser.add_argument("--top", type=int, default=15, help="Сколько top-признаков показать")
+    parser.add_argument("--output", default=None, help="Путь для сохранения результатов в JSON")
     return parser
 
 
@@ -338,15 +382,32 @@ def main():
         )
 
     if len(results) > 1:
+        mw_records = [{"name": r.name, "p_value": r.mw_p_value} for r in results]
+        apply_bh_correction(mw_records, p_key="p_value", q_key="q_value")
+        q_map = {rec["name"]: rec["q_value"] for rec in mw_records}
+        for r in results:
+            r.mw_q_value = q_map.get(r.name)
+
         print(f"\n{'=' * 90}")
         print("СРАВНЕНИЕ КАНДИДАТОВ НАТАЛА")
         print(f"{'=' * 90}")
-        print(f"{'Кандидат':<24} {'Pivot hits':>12} {'Base hits':>12} {'MW p-value':>12}")
+        print(f"{'Кандидат':<24} {'Pivot hits':>12} {'Base hits':>12} {'MW p':>12} {'MW q':>12}")
         for item in sorted(results, key=lambda row: row.mw_p_value):
+            q_text = f"{item.mw_q_value:.4f}" if item.mw_q_value is not None else "—"
             print(
                 f"{item.name:<24} {item.pivot_hit_mean:>12.2f} {item.baseline_hit_mean:>12.2f} "
-                f"{item.mw_p_value:>12.4f}"
+                f"{item.mw_p_value:>12.4f} {q_text:>12}"
             )
+
+    if args.output:
+        output_data = []
+        for r in results:
+            d = asdict(r)
+            d["birth_dt"] = r.birth_dt.isoformat()
+            output_data.append(d)
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(output_data, f, ensure_ascii=False, indent=2)
+        print(f"\nРезультаты сохранены в {args.output}")
 
 
 if __name__ == "__main__":
