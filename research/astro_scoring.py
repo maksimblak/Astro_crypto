@@ -8,6 +8,8 @@ BTC Астро-скоринг: честная train/holdout-модель для 
 4. После валидации переобучаемся на полной истории для будущего календаря.
 """
 
+import hashlib
+import json
 import math
 import sqlite3
 from datetime import datetime, timedelta
@@ -24,13 +26,28 @@ from scipy import stats
 matplotlib.use("Agg")
 
 try:
+    from .log import get_logger
+except ImportError:
+    try:
+        from log import get_logger
+    except ImportError:
+        import logging
+        def get_logger(name: str) -> logging.Logger:
+            return logging.getLogger(name)
+
+logger = get_logger(__name__)
+
+try:
     from .astro_shared import (
         DB_PATH,
         ECLIPSE_DATES,
         ELEMENT_MAP,
         MODALITY_MAP,
         apply_bh_correction,
+        ecliptic_lon_deg,
         get_zodiac_sign,
+        is_retrograde,
+        is_stationary,
         today_local_date,
     )
 except ImportError:
@@ -40,7 +57,10 @@ except ImportError:
         ELEMENT_MAP,
         MODALITY_MAP,
         apply_bh_correction,
+        ecliptic_lon_deg,
         get_zodiac_sign,
+        is_retrograde,
+        is_stationary,
         today_local_date,
     )
 
@@ -125,44 +145,15 @@ def _planet_speed_for_ordinal(planet_name: str, ordinal: int) -> float:
     return diff
 
 
-def _get_ecliptic_lon(body):
-    return float(ephem.Ecliptic(body).lon) * 180 / math.pi
-
-
 def _angular_distance_deg(lon_a: float, lon_b: float) -> float:
     diff = abs(lon_a - lon_b)
     return diff if diff <= 180 else 360 - diff
 
 
-def _is_retrograde(planet_class, d_now, d_prev):
-    lon_now = _get_ecliptic_lon(planet_class(d_now))
-    lon_prev = _get_ecliptic_lon(planet_class(d_prev))
-    diff = lon_now - lon_prev
-    if diff > 180:
-        diff -= 360
-    elif diff < -180:
-        diff += 360
-    return diff < 0
-
-
-def _is_stationary(planet_class, d_now, orb_days=2):
-    d_before = ephem.Date(d_now - orb_days)
-    d_after = ephem.Date(d_now + orb_days)
-    lon_before = _get_ecliptic_lon(planet_class(d_before))
-    lon_now = _get_ecliptic_lon(planet_class(d_now))
-    lon_after = _get_ecliptic_lon(planet_class(d_after))
-
-    def norm(a, b):
-        diff = a - b
-        if diff > 180:
-            diff -= 360
-        elif diff < -180:
-            diff += 360
-        return diff
-
-    d1 = norm(lon_now, lon_before)
-    d2 = norm(lon_after, lon_now)
-    return (d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)
+# _is_retrograde, _is_stationary, _get_ecliptic_lon → astro_shared
+_get_ecliptic_lon = ecliptic_lon_deg
+_is_retrograde = is_retrograde
+_is_stationary = is_stationary
 
 
 def _get_lunar_node(d):
@@ -442,16 +433,25 @@ def assign_sample_split(history_df: pd.DataFrame, test_ratio: float = 0.20) -> t
     return history_df, split_start
 
 
+try:
+    from .config import WEIGHT_SHRINKAGE_FACTOR
+except ImportError:
+    try:
+        from config import WEIGHT_SHRINKAGE_FACTOR
+    except ImportError:
+        WEIGHT_SHRINKAGE_FACTOR = 0.85
+
+
 def _shrunken_weight(lift: float, p_value: float, scale: float, p_cap: float) -> float:
     lift = max(lift, 1e-6)
     strength = abs(math.log2(lift))
     shrink = max(0.0, min(1.0, (p_cap - p_value) / p_cap))
-    return round(min(scale, strength * scale * shrink), 2)
+    return round(min(scale, strength * scale * shrink) * WEIGHT_SHRINKAGE_FACTOR, 2)
 
 
 def _continuous_weight(effect_size: float, p_value: float, scale: float = 0.75, p_cap: float = 0.25) -> float:
     shrink = max(0.0, min(1.0, (p_cap - p_value) / p_cap))
-    raw = effect_size * scale * shrink
+    raw = effect_size * scale * shrink * WEIGHT_SHRINKAGE_FACTOR
     return round(max(-1.0, min(1.0, raw)), 2)
 
 
@@ -949,7 +949,11 @@ def validate_model():
     full_pivot = full_scored_history[full_scored_history["is_pivot"]]["score"].to_numpy()
     full_thresholds = derive_thresholds(full_base, full_pivot)
 
-    return scored_history, test_pdf, test_base, test_metrics, full_model, thresholds, full_scored_history, full_thresholds
+    return (
+        scored_history, test_pdf, test_base, test_metrics, full_model,
+        thresholds, full_scored_history, full_thresholds,
+        train_metrics, split_start,
+    )
 
 
 def generate_calendar(start_date, end_date, model, thresholds):
@@ -1081,6 +1085,72 @@ def plot_results(pdf, base_arr, calendar_df, thresholds):
     plt.close()
 
 
+def _model_fingerprint(model: dict) -> str:
+    """Стабильный хеш весов модели для отслеживания изменений."""
+    payload = json.dumps(
+        {
+            "reversal_weights": model["reversal_model"]["weights"],
+            "continuous_weights": {
+                k: v["weight"] for k, v in model["reversal_model"]["continuous_weights"].items()
+            },
+            "direction_weights": model["direction_model"]["weights"],
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()[:12]
+
+
+def save_model_metadata(model: dict, split_date: str, train_metrics: dict, test_metrics: dict):
+    """Сохраняет версию модели в БД для отслеживания и отката."""
+    fingerprint = _model_fingerprint(model)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS btc_model_versions ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  fingerprint TEXT NOT NULL,"
+        "  created_at TEXT NOT NULL,"
+        "  split_date TEXT,"
+        "  shrinkage_factor REAL,"
+        "  n_reversal_features INTEGER,"
+        "  n_direction_features INTEGER,"
+        "  train_mw_p REAL,"
+        "  test_mw_p REAL,"
+        "  test_direction_accuracy REAL,"
+        "  weights_json TEXT"
+        ")"
+    )
+    conn.execute(
+        "INSERT INTO btc_model_versions "
+        "(fingerprint, created_at, split_date, shrinkage_factor, "
+        " n_reversal_features, n_direction_features, "
+        " train_mw_p, test_mw_p, test_direction_accuracy, weights_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            fingerprint,
+            datetime.now().isoformat(timespec="seconds"),
+            split_date,
+            WEIGHT_SHRINKAGE_FACTOR,
+            len(model["reversal_model"]["weights"]) + len(model["reversal_model"]["continuous_weights"]),
+            len(model["direction_model"]["weights"]),
+            train_metrics.get("mw_p"),
+            test_metrics.get("mw_p"),
+            test_metrics.get("direction_accuracy"),
+            json.dumps(
+                {
+                    "reversal": model["reversal_model"]["weights"],
+                    "continuous": model["reversal_model"]["continuous_weights"],
+                    "direction": model["direction_model"]["weights"],
+                },
+                ensure_ascii=False,
+            ),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    logger.info("Модель сохранена: fingerprint=%s, shrinkage=%.2f", fingerprint, WEIGHT_SHRINKAGE_FACTOR)
+    return fingerprint
+
+
 def save_calendar_to_db(calendar_df):
     conn = sqlite3.connect(DB_PATH)
     rows = []
@@ -1153,7 +1223,18 @@ def save_history_to_db(history_df):
 
 
 def main():
-    history_eval_df, pdf, base_arr, _, full_model, eval_thresholds, history_full_df, full_thresholds = validate_model()
+    (
+        history_eval_df, pdf, base_arr, test_metrics, full_model,
+        eval_thresholds, history_full_df, full_thresholds,
+        train_metrics, split_start,
+    ) = validate_model()
+
+    save_model_metadata(
+        full_model,
+        split_date=split_start.strftime("%Y-%m-%d"),
+        train_metrics=train_metrics,
+        test_metrics=test_metrics,
+    )
 
     today = datetime.combine(today_local_date(), datetime.min.time())
     end_date = datetime(2028, 12, 31)

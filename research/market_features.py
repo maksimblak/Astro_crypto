@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from datetime import datetime, timezone
 
 import numpy as np
@@ -76,10 +77,18 @@ def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     return normalized[required]
 
 
-def _request_json(session: requests.Session, url: str, params: dict | None = None):
-    response = session.get(url, params=params, timeout=HTTP_TIMEOUT, headers=HTTP_HEADERS)
-    response.raise_for_status()
-    return response.json()
+def _request_json(session: requests.Session, url: str, params: dict | None = None, max_retries: int = 3):
+    for attempt in range(max_retries):
+        try:
+            response = session.get(url, params=params, timeout=HTTP_TIMEOUT, headers=HTTP_HEADERS)
+            response.raise_for_status()
+            return response.json()
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(2 ** attempt)
+        except requests.HTTPError:
+            raise
 
 
 def _epoch_to_date(epoch_seconds: int | str) -> str:

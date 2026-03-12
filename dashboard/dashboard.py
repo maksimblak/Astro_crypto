@@ -6,6 +6,8 @@ BTC Astro Dashboard — Flask backend.
 
 import sqlite3
 import os
+import time
+import threading
 from datetime import date
 import numpy as np
 from flask import Flask, Response, jsonify, render_template
@@ -23,6 +25,10 @@ except ImportError:
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "btc_research.db")
+
+_regime_cache = {"data": None, "expires_at": 0.0}
+_regime_cache_lock = threading.Lock()
+REGIME_CACHE_TTL = 300  # 5 minutes
 
 
 def get_db():
@@ -164,6 +170,11 @@ def api_daily():
 
 @app.route("/api/regime")
 def api_regime():
+    now = time.monotonic()
+    with _regime_cache_lock:
+        if _regime_cache["data"] is not None and now < _regime_cache["expires_at"]:
+            return jsonify(_regime_cache["data"])
+
     conn = get_db()
     try:
         feature_select = market_feature_select_sql(conn)
@@ -186,7 +197,12 @@ def api_regime():
     conn.close()
     if not rows:
         return jsonify({"error": "No market data found in btc_daily."}), 404
-    return jsonify(build_regime_payload(rows))
+
+    result = build_regime_payload(rows)
+    with _regime_cache_lock:
+        _regime_cache["data"] = result
+        _regime_cache["expires_at"] = time.monotonic() + REGIME_CACHE_TTL
+    return jsonify(result)
 
 
 @app.route("/api/today")

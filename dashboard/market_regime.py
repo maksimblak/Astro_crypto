@@ -4,6 +4,48 @@ from __future__ import annotations
 
 from statistics import mean, median, pstdev
 
+# --- Direction thresholds ---
+CLOSE_VS_200_STRONG = 0.10       # Price strongly above 200DMA
+SMA50_VS_200_STRONG = 0.05       # Golden/death cross confirmed
+MOMENTUM_20_STRONG = 0.08        # Strong short-term momentum
+MOMENTUM_20_MILD = 0.03          # Mild short-term momentum
+MOMENTUM_90_VERY_STRONG = 0.25   # Very strong medium-term trend
+MOMENTUM_90_STRONG = 0.10        # Strong medium-term trend
+DRAWDOWN_SHALLOW = -0.10         # Shallow drawdown from ATH
+DRAWDOWN_MODERATE = -0.20        # Moderate drawdown
+DRAWDOWN_DEEP = -0.35            # Deep drawdown
+DRAWDOWN_EXTREME = -0.50         # Extreme drawdown (capitulation)
+VOLUME_SPIKE_Z = 1.5             # Volume z-score for spike detection
+
+# --- Stress thresholds ---
+AMIHUD_Z_HIGH = 1.5              # High illiquidity z-score
+AMIHUD_Z_ELEVATED = 0.75         # Elevated illiquidity
+RANGE_EXPANSION_HIGH = 1.75      # Strong range expansion vs 20d median
+RANGE_EXPANSION_ELEVATED = 1.35  # Elevated range expansion
+VOLUME_SHOCK_Z = 2.0             # Volume shock threshold
+
+# --- Context thresholds ---
+WIKI_Z_HIGH = 1.30               # High Wikipedia attention
+WIKI_Z_LOW = -1.20               # Low Wikipedia attention
+FEAR_GREED_GREEDY = 70           # Greed territory
+FEAR_GREED_FEARFUL = 24          # Fear territory
+FUNDING_Z_HIGH = 0.98            # High funding rate z
+FUNDING_Z_LOW = -1.12            # Low funding rate z
+PERP_PREMIUM_HIGH = 0.00019      # Perp premium bullish
+PERP_PREMIUM_LOW = -0.00026      # Perp premium bearish
+OI_Z_LOW = -1.48                 # Low OI (contrarian bull)
+OI_Z_HIGH = 0.42                 # High OI (crowding risk)
+ADDRESSES_Z_HIGH = 0.91          # High on-chain activity
+ADDRESSES_Z_LOW = -0.90          # Low on-chain activity
+
+# --- Regime classification thresholds ---
+REGIME_STRONG_BULL = 10          # Direction score for strong bull
+REGIME_MILD_BULL = 4             # Direction score for mild bull
+REGIME_STRONG_BEAR = -11         # Direction score for strong bear
+REGIME_MILD_BEAR = -6            # Direction score for mild bear
+REGIME_DISTRIBUTION = -2         # Direction score for distribution
+RECOVERY_DRAWDOWN = -0.18        # Drawdown threshold for recovery classification
+
 
 def _avg(values):
     return mean(values) if values else None
@@ -247,8 +289,8 @@ def _classify_regime(metrics, direction_score, stress_score):
     close_vs_200 = metrics["close_vs_200"]
     drawdown = metrics["drawdown_ath"]
 
-    if direction_score >= 10:
-        if (drawdown is not None and drawdown <= -0.18) or (close_vs_200 is not None and close_vs_200 <= 0):
+    if direction_score >= REGIME_STRONG_BULL:
+        if (drawdown is not None and drawdown <= RECOVERY_DRAWDOWN) or (close_vs_200 is not None and close_vs_200 <= 0):
             return {
                 "code": "recovery",
                 "label": "Восстановление",
@@ -262,8 +304,8 @@ def _classify_regime(metrics, direction_score, stress_score):
             "summary": "Сильный направленный режим: 200DMA, momentum и drawdown подтверждают устойчивый uptrend.",
         }
 
-    if direction_score >= 4:
-        if drawdown is not None and drawdown <= -0.10:
+    if direction_score >= REGIME_MILD_BULL:
+        if drawdown is not None and drawdown <= DRAWDOWN_SHALLOW:
             return {
                 "code": "recovery",
                 "label": "Восстановление",
@@ -277,7 +319,7 @@ def _classify_regime(metrics, direction_score, stress_score):
             "summary": "Direction устойчиво положительный: среднесрочный импульс и длинные средние смотрят вверх.",
         }
 
-    if direction_score <= -11:
+    if direction_score <= REGIME_STRONG_BEAR:
         return {
             "code": "bear",
             "label": "Медвежий тренд",
@@ -285,7 +327,7 @@ def _classify_regime(metrics, direction_score, stress_score):
             "summary": "Сильный downtrend: рынок ниже длинных средних, а momentum остаётся отрицательным.",
         }
 
-    if direction_score <= -6:
+    if direction_score <= REGIME_MILD_BEAR:
         return {
             "code": "bear",
             "label": "Медвежий тренд",
@@ -293,7 +335,7 @@ def _classify_regime(metrics, direction_score, stress_score):
             "summary": "Direction отрицательный по ключевым трендовым сигналам. Преимущество пока на стороне продавцов.",
         }
 
-    if direction_score <= -2:
+    if direction_score <= REGIME_DISTRIBUTION:
         return {
             "code": "distribution",
             "label": "Распределение",
@@ -313,11 +355,11 @@ def _build_direction_signals(metrics):
     close_vs_200 = metrics["close_vs_200"]
     if close_vs_200 is None:
         close_impact = 0
-    elif close_vs_200 > 0.10:
+    elif close_vs_200 > CLOSE_VS_200_STRONG:
         close_impact = 3
     elif close_vs_200 > 0:
         close_impact = 2
-    elif close_vs_200 <= -0.10:
+    elif close_vs_200 <= -CLOSE_VS_200_STRONG:
         close_impact = -3
     else:
         close_impact = -2
@@ -325,11 +367,11 @@ def _build_direction_signals(metrics):
     sma50_vs_200 = metrics["sma50_vs_200"]
     if sma50_vs_200 is None:
         cross_impact = 0
-    elif sma50_vs_200 > 0.05:
+    elif sma50_vs_200 > SMA50_VS_200_STRONG:
         cross_impact = 2
     elif sma50_vs_200 > 0:
         cross_impact = 1
-    elif sma50_vs_200 <= -0.05:
+    elif sma50_vs_200 <= -SMA50_VS_200_STRONG:
         cross_impact = -2
     else:
         cross_impact = -1
@@ -337,13 +379,13 @@ def _build_direction_signals(metrics):
     mom20 = metrics["momentum_20"]
     if mom20 is None:
         mom20_impact = 0
-    elif mom20 > 0.08:
+    elif mom20 > MOMENTUM_20_STRONG:
         mom20_impact = 2
-    elif mom20 > 0.03:
+    elif mom20 > MOMENTUM_20_MILD:
         mom20_impact = 1
-    elif mom20 < -0.08:
+    elif mom20 < -MOMENTUM_20_STRONG:
         mom20_impact = -2
-    elif mom20 < -0.03:
+    elif mom20 < -MOMENTUM_20_MILD:
         mom20_impact = -1
     else:
         mom20_impact = 0
@@ -351,15 +393,15 @@ def _build_direction_signals(metrics):
     mom90 = metrics["momentum_90"]
     if mom90 is None:
         mom90_impact = 0
-    elif mom90 > 0.25:
+    elif mom90 > MOMENTUM_90_VERY_STRONG:
         mom90_impact = 5
-    elif mom90 > 0.10:
+    elif mom90 > MOMENTUM_90_STRONG:
         mom90_impact = 4
     elif mom90 > 0:
         mom90_impact = 2
-    elif mom90 < -0.25:
+    elif mom90 < -MOMENTUM_90_VERY_STRONG:
         mom90_impact = -5
-    elif mom90 < -0.10:
+    elif mom90 < -MOMENTUM_90_STRONG:
         mom90_impact = -4
     elif mom90 < 0:
         mom90_impact = -2
@@ -369,21 +411,21 @@ def _build_direction_signals(metrics):
     drawdown = metrics["drawdown_ath"]
     if drawdown is None:
         drawdown_impact = 0
-    elif drawdown >= -0.10:
+    elif drawdown >= DRAWDOWN_SHALLOW:
         drawdown_impact = 3
-    elif drawdown > -0.20:
+    elif drawdown > DRAWDOWN_MODERATE:
         drawdown_impact = 1
-    elif drawdown <= -0.50:
+    elif drawdown <= DRAWDOWN_EXTREME:
         drawdown_impact = -4
-    elif drawdown <= -0.35:
+    elif drawdown <= DRAWDOWN_DEEP:
         drawdown_impact = -3
-    elif drawdown <= -0.20:
+    elif drawdown <= DRAWDOWN_MODERATE:
         drawdown_impact = -2
     else:
         drawdown_impact = 0
 
     volume_z = metrics["volume_z_20"]
-    if volume_z is None or mom20 is None or volume_z < 1.5:
+    if volume_z is None or mom20 is None or volume_z < VOLUME_SPIKE_Z:
         volume_impact = 0
     elif mom20 > 0:
         volume_impact = 1
@@ -442,9 +484,9 @@ def _build_stress_signals(metrics):
     amihud_z = metrics["amihud_z_90d"]
     if amihud_z is None:
         amihud_points = 0
-    elif amihud_z >= 1.5:
+    elif amihud_z >= AMIHUD_Z_HIGH:
         amihud_points = 2
-    elif amihud_z >= 0.75:
+    elif amihud_z >= AMIHUD_Z_ELEVATED:
         amihud_points = 1
     else:
         amihud_points = 0
@@ -452,9 +494,9 @@ def _build_stress_signals(metrics):
     range_compression = metrics["range_compression_20d"]
     if range_compression is None:
         range_points = 0
-    elif range_compression >= 1.75:
+    elif range_compression >= RANGE_EXPANSION_HIGH:
         range_points = 2
-    elif range_compression >= 1.35:
+    elif range_compression >= RANGE_EXPANSION_ELEVATED:
         range_points = 1
     else:
         range_points = 0
@@ -462,20 +504,20 @@ def _build_stress_signals(metrics):
     drawdown = metrics["drawdown_ath"]
     if drawdown is None:
         drawdown_points = 0
-    elif drawdown <= -0.50:
+    elif drawdown <= DRAWDOWN_EXTREME:
         drawdown_points = 3
-    elif drawdown <= -0.35:
+    elif drawdown <= DRAWDOWN_DEEP:
         drawdown_points = 2
-    elif drawdown <= -0.20:
+    elif drawdown <= DRAWDOWN_MODERATE:
         drawdown_points = 1
     else:
         drawdown_points = 0
 
     volume_z = metrics["volume_z_20"]
-    volume_points = 1 if volume_z is not None and abs(volume_z) >= 2.0 else 0
+    volume_points = 1 if volume_z is not None and abs(volume_z) >= VOLUME_SHOCK_Z else 0
 
     mom20 = metrics["momentum_20"]
-    momentum_points = 1 if mom20 is not None and mom20 <= -0.08 else 0
+    momentum_points = 1 if mom20 is not None and mom20 <= -MOMENTUM_20_STRONG else 0
 
     return [
         _stress_signal(
@@ -520,9 +562,9 @@ def _build_context_signals(metrics):
     wiki_z = metrics["wiki_views_z_30d"]
     if wiki_z is None:
         wiki_score = 0
-    elif wiki_z >= 1.30:
+    elif wiki_z >= WIKI_Z_HIGH:
         wiki_score = 2
-    elif wiki_z <= -1.20:
+    elif wiki_z <= WIKI_Z_LOW:
         wiki_score = -2
     else:
         wiki_score = 0
@@ -530,9 +572,9 @@ def _build_context_signals(metrics):
     fear_greed = metrics["fear_greed_value"]
     if fear_greed is None:
         fear_score = 0
-    elif fear_greed >= 70:
+    elif fear_greed >= FEAR_GREED_GREEDY:
         fear_score = 3
-    elif fear_greed <= 24:
+    elif fear_greed <= FEAR_GREED_FEARFUL:
         fear_score = -3
     else:
         fear_score = 0
@@ -540,9 +582,9 @@ def _build_context_signals(metrics):
     funding_z = metrics["funding_rate_z_30d"]
     if funding_z is None:
         funding_score = 0
-    elif funding_z >= 0.98:
+    elif funding_z >= FUNDING_Z_HIGH:
         funding_score = 1
-    elif funding_z <= -1.12:
+    elif funding_z <= FUNDING_Z_LOW:
         funding_score = -1
     else:
         funding_score = 0
@@ -550,9 +592,9 @@ def _build_context_signals(metrics):
     perp_premium = metrics["perp_premium_daily"]
     if perp_premium is None:
         premium_score = 0
-    elif perp_premium >= 0.00019:
+    elif perp_premium >= PERP_PREMIUM_HIGH:
         premium_score = 2
-    elif perp_premium <= -0.00026:
+    elif perp_premium <= PERP_PREMIUM_LOW:
         premium_score = -2
     else:
         premium_score = 0
@@ -560,9 +602,9 @@ def _build_context_signals(metrics):
     oi_z = metrics["open_interest_z_30d"]
     if oi_z is None:
         oi_score = 0
-    elif oi_z <= -1.48:
+    elif oi_z <= OI_Z_LOW:
         oi_score = 1
-    elif oi_z >= 0.42:
+    elif oi_z >= OI_Z_HIGH:
         oi_score = -1
     else:
         oi_score = 0
@@ -570,9 +612,9 @@ def _build_context_signals(metrics):
     active_addresses_z = metrics["unique_addresses_z_30d"]
     if active_addresses_z is None:
         addresses_score = 0
-    elif active_addresses_z >= 0.91:
+    elif active_addresses_z >= ADDRESSES_Z_HIGH:
         addresses_score = 2
-    elif active_addresses_z <= -0.90:
+    elif active_addresses_z <= ADDRESSES_Z_LOW:
         addresses_score = -2
     else:
         addresses_score = 0

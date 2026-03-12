@@ -15,7 +15,10 @@ import matplotlib.dates as mdates
 
 from astro_shared import yfinance_exclusive_end
 from derivatives_history import save_derivatives_history_to_db
+from log import get_logger
 from market_features import build_market_features, save_market_features_to_db
+
+logger = get_logger(__name__)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.db")
 
@@ -60,13 +63,13 @@ def init_db():
 def download_btc_data(start: str = "2016-01-01", end: str | None = None) -> pd.DataFrame:
     """Загружает daily OHLCV BTC/USD через yfinance."""
     end = end or yfinance_exclusive_end()
-    print(f"Загрузка BTC-USD данных за {start} — {end}...")
+    logger.info(f"Загрузка BTC-USD данных за {start} — {end}...")
     df = yf.download("BTC-USD", start=start, end=end, progress=False)
     df.index = df.index.tz_localize(None)
     # yfinance может вернуть MultiIndex колонки — убираем
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
-    print(f"Загружено {len(df)} дней данных.")
+    logger.info(f"Загружено {len(df)} дней данных.")
     return df
 
 
@@ -87,7 +90,7 @@ def save_daily_to_db(conn: sqlite3.Connection, df: pd.DataFrame):
         records
     )
     conn.commit()
-    print(f"Сохранено {len(records)} дневных свечей в БД.")
+    logger.info(f"Сохранено {len(records)} дневных свечей в БД.")
 
 
 def load_existing_daily_from_db(conn: sqlite3.Connection) -> pd.DataFrame:
@@ -266,7 +269,7 @@ def save_pivots_to_db(conn: sqlite3.Connection, df: pd.DataFrame):
         records
     )
     conn.commit()
-    print(f"Сохранено {len(records)} точек разворота в БД.")
+    logger.info(f"Сохранено {len(records)} точек разворота в БД.")
 
 
 def print_results(df: pd.DataFrame):
@@ -371,7 +374,7 @@ def plot_chart(prices: pd.Series, df: pd.DataFrame, save_path: str = os.path.joi
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    print(f"\nГрафик сохранён: {save_path}")
+    logger.info(f"График сохранён: {save_path}")
     plt.close()
 
 
@@ -382,7 +385,7 @@ def main():
     # 2. Загрузка данных
     df_ohlcv = download_btc_data("2016-01-01")
     if df_ohlcv.empty:
-        print("yfinance вернул пустой набор. Использую текущий snapshot из btc_daily.")
+        logger.warning("yfinance вернул пустой набор. Использую текущий snapshot из btc_daily.")
         df_ohlcv = load_existing_daily_from_db(conn)
         if df_ohlcv.empty:
             conn.close()
@@ -409,7 +412,7 @@ def main():
     df_csv = df.copy()
     df_csv["date"] = df_csv["date"].dt.strftime("%Y-%m-%d")
     df_csv.to_csv(csv_path, index=False)
-    print(f"CSV сохранён: {csv_path}")
+    logger.info(f"CSV сохранён: {csv_path}")
 
     # 6. Вывод в консоль
     print_results(df)
@@ -421,7 +424,7 @@ def main():
     print_db_examples(conn)
 
     conn.close()
-    print(f"\nБД сохранена: {DB_PATH}")
+    logger.info(f"БД сохранена: {DB_PATH}")
     print("Подключение: sqlite3 btc_research.db")
 
 

@@ -26,6 +26,18 @@ try:
 except ImportError:
     from astro_shared import DB_PATH, apply_bh_correction
 
+try:
+    from .log import get_logger
+except ImportError:
+    try:
+        from log import get_logger
+    except ImportError:
+        import logging
+        def get_logger(name: str) -> logging.Logger:
+            return logging.getLogger(name)
+
+logger = get_logger(__name__)
+
 
 DEFAULT_BIRTH_SPECS = [
     "whitepaper_date_utc_midnight=2008-10-31T00:00:00",

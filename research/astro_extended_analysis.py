@@ -24,42 +24,11 @@ from astro_shared import (
     MODALITY_MAP,
     ZODIAC_SIGNS,
     apply_bh_correction,
+    ecliptic_lon_deg as _get_ecliptic_lon,
     get_zodiac_sign,
+    is_retrograde as _is_retrograde,
+    is_stationary as _is_stationary,
 )
-
-
-def _get_ecliptic_lon(body):
-    """Эклиптическая долгота в градусах."""
-    return float(ephem.Ecliptic(body).lon) * 180 / math.pi
-
-
-def _is_retrograde(planet_class, d_now, d_prev):
-    lon_now = _get_ecliptic_lon(planet_class(d_now))
-    lon_prev = _get_ecliptic_lon(planet_class(d_prev))
-    diff = lon_now - lon_prev
-    if diff > 180:
-        diff -= 360
-    elif diff < -180:
-        diff += 360
-    return diff < 0
-
-
-def _is_stationary(planet_class, d_now, orb_days=2):
-    d_before = ephem.Date(d_now - orb_days)
-    d_after = ephem.Date(d_now + orb_days)
-    lon_before = _get_ecliptic_lon(planet_class(d_before))
-    lon_now = _get_ecliptic_lon(planet_class(d_now))
-    lon_after = _get_ecliptic_lon(planet_class(d_after))
-
-    def norm(a, b):
-        d = a - b
-        if d > 180: d -= 360
-        elif d < -180: d += 360
-        return d
-
-    d1 = norm(lon_now, lon_before)
-    d2 = norm(lon_after, lon_now)
-    return (d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)
 
 
 def _get_lunar_node(d):

@@ -16,52 +16,21 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 try:
-    from .astro_shared import DB_PATH, ECLIPSE_DATES, ZODIAC_SIGNS, get_zodiac_sign
+    from .astro_shared import (
+        DB_PATH, ECLIPSE_DATES, ZODIAC_SIGNS, get_zodiac_sign,
+        is_retrograde as _is_retrograde,
+        is_stationary as _is_stationary,
+    )
 except ImportError:
-    from astro_shared import DB_PATH, ECLIPSE_DATES, ZODIAC_SIGNS, get_zodiac_sign
+    from astro_shared import (
+        DB_PATH, ECLIPSE_DATES, ZODIAC_SIGNS, get_zodiac_sign,
+        is_retrograde as _is_retrograde,
+        is_stationary as _is_stationary,
+    )
 
 START_DATE = "2020-01-01"
 END_DATE = "2026-03-11"
 EVENT_WINDOW_DAYS = 6
-
-
-def _is_retrograde(planet_class, d_now, d_prev):
-    """Определяет ретроградность планеты по изменению эклиптической долготы."""
-    body_now = planet_class(d_now)
-    body_prev = planet_class(d_prev)
-    lon_now = float(ephem.Ecliptic(body_now).lon)
-    lon_prev = float(ephem.Ecliptic(body_prev).lon)
-    diff = lon_now - lon_prev
-    if diff > math.pi:
-        diff -= 2 * math.pi
-    elif diff < -math.pi:
-        diff += 2 * math.pi
-    return diff < 0
-
-
-def _is_stationary(planet_class, d_now, orb_days=2):
-    """Планета стационарна, если меняет направление в пределах ±orb_days."""
-    d_before = ephem.Date(d_now - orb_days)
-    d_after = ephem.Date(d_now + orb_days)
-
-    def get_lon(d):
-        return float(ephem.Ecliptic(planet_class(d)).lon)
-
-    lon_before = get_lon(d_before)
-    lon_now = get_lon(d_now)
-    lon_after = get_lon(d_after)
-
-    def norm_diff(a, b):
-        diff = a - b
-        if diff > math.pi:
-            diff -= 2 * math.pi
-        elif diff < -math.pi:
-            diff += 2 * math.pi
-        return diff
-
-    dir_before = norm_diff(lon_now, lon_before)
-    dir_after = norm_diff(lon_after, lon_now)
-    return (dir_before > 0 and dir_after < 0) or (dir_before < 0 and dir_after > 0)
 
 
 def _nearest_station_days(planet_class, date, window_days=EVENT_WINDOW_DAYS):

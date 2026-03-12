@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import math
 import os
 from datetime import date, datetime, timedelta
 
+import ephem
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "btc_research.db")
@@ -81,6 +83,44 @@ def today_local_date() -> date:
 def yfinance_exclusive_end(base_date: date | None = None) -> str:
     current_date = base_date or today_local_date()
     return (current_date + timedelta(days=1)).isoformat()
+
+
+def ecliptic_lon_deg(body) -> float:
+    """Эклиптическая долгота тела в градусах (0–360)."""
+    return float(ephem.Ecliptic(body).lon) * 180.0 / math.pi
+
+
+def is_retrograde(planet_class, d_now, d_prev) -> bool:
+    """Планета ретроградна (движется назад по эклиптике)."""
+    lon_now = ecliptic_lon_deg(planet_class(d_now))
+    lon_prev = ecliptic_lon_deg(planet_class(d_prev))
+    diff = lon_now - lon_prev
+    if diff > 180:
+        diff -= 360
+    elif diff < -180:
+        diff += 360
+    return diff < 0
+
+
+def is_stationary(planet_class, d_now, orb_days: int = 2) -> bool:
+    """Планета стационарная (меняет направление в пределах ±orb_days)."""
+    d_before = ephem.Date(d_now - orb_days)
+    d_after = ephem.Date(d_now + orb_days)
+    lon_before = ecliptic_lon_deg(planet_class(d_before))
+    lon_now = ecliptic_lon_deg(planet_class(d_now))
+    lon_after = ecliptic_lon_deg(planet_class(d_after))
+
+    def _norm(a: float, b: float) -> float:
+        diff = a - b
+        if diff > 180:
+            diff -= 360
+        elif diff < -180:
+            diff += 360
+        return diff
+
+    d1 = _norm(lon_now, lon_before)
+    d2 = _norm(lon_after, lon_now)
+    return (d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)
 
 
 def apply_bh_correction(records: list[dict], p_key: str = "p_value", q_key: str = "q_value") -> list[dict]:

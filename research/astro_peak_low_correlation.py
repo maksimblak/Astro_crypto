@@ -20,12 +20,16 @@ from scipy import stats
 try:
     from .astro_shared import (
         DB_PATH, ECLIPSE_DATES, ZODIAC_SIGNS, ELEMENT_MAP, MODALITY_MAP,
-        get_zodiac_sign, apply_bh_correction,
+        ecliptic_lon_deg, get_zodiac_sign, apply_bh_correction,
+        is_retrograde as _is_retrograde_3arg,
+        is_stationary as _is_stationary,
     )
 except ImportError:
     from astro_shared import (
         DB_PATH, ECLIPSE_DATES, ZODIAC_SIGNS, ELEMENT_MAP, MODALITY_MAP,
-        get_zodiac_sign, apply_bh_correction,
+        ecliptic_lon_deg, get_zodiac_sign, apply_bh_correction,
+        is_retrograde as _is_retrograde_3arg,
+        is_stationary as _is_stationary,
     )
 
 
@@ -61,36 +65,12 @@ ALL_PLANETS = {
 # ── Утилиты ──────────────────────────────────────────────────────────
 
 def _lon_deg(body_cls, d):
-    return float(ephem.Ecliptic(body_cls(d)).lon) * 180 / math.pi
+    return ecliptic_lon_deg(body_cls(d))
 
 
 def _is_retrograde(body_cls, d):
     d_prev = ephem.Date(d - 1)
-    lon_now = _lon_deg(body_cls, d)
-    lon_prev = _lon_deg(body_cls, d_prev)
-    diff = lon_now - lon_prev
-    if diff > 180:
-        diff -= 360
-    elif diff < -180:
-        diff += 360
-    return diff < 0
-
-
-def _is_stationary(body_cls, d, orb_days=2):
-    def lon(dt):
-        return _lon_deg(body_cls, dt)
-
-    def norm(a, b):
-        diff = a - b
-        if diff > 180: diff -= 360
-        elif diff < -180: diff += 360
-        return diff
-
-    d_before = ephem.Date(d - orb_days)
-    d_after = ephem.Date(d + orb_days)
-    dir_before = norm(lon(d), lon(d_before))
-    dir_after = norm(lon(d_after), lon(d))
-    return (dir_before > 0 and dir_after < 0) or (dir_before < 0 and dir_after > 0)
+    return _is_retrograde_3arg(body_cls, d, d_prev)
 
 
 def _near_station(body_cls, date, window=STATION_WINDOW):

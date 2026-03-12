@@ -16,48 +16,12 @@ from itertools import combinations
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from astro_shared import DB_PATH, ECLIPSES, ECLIPSE_DATES, ZODIAC_SIGNS, apply_bh_correction, get_zodiac_sign
-
-
-# ============================================================
-# АСТРО-РАСЧЁТЫ (из основного скрипта)
-# ============================================================
-
-def _is_retrograde(planet_class, d_now, d_prev):
-    body_now = planet_class(d_now)
-    body_prev = planet_class(d_prev)
-    lon_now = float(ephem.Ecliptic(body_now).lon)
-    lon_prev = float(ephem.Ecliptic(body_prev).lon)
-    diff = lon_now - lon_prev
-    if diff > math.pi:
-        diff -= 2 * math.pi
-    elif diff < -math.pi:
-        diff += 2 * math.pi
-    return diff < 0
-
-def _is_stationary(planet_class, d_now, orb_days=2):
-    """Планета стационарная (меняет направление в пределах ±orb_days)."""
-    d_before = ephem.Date(d_now - orb_days)
-    d_after = ephem.Date(d_now + orb_days)
-
-    def get_lon(d):
-        return float(ephem.Ecliptic(planet_class(d)).lon)
-
-    lon_before = get_lon(d_before)
-    lon_now = get_lon(d_now)
-    lon_after = get_lon(d_after)
-
-    def norm_diff(a, b):
-        d = a - b
-        if d > math.pi: d -= 2 * math.pi
-        elif d < -math.pi: d += 2 * math.pi
-        return d
-
-    dir_before = norm_diff(lon_now, lon_before)
-    dir_after = norm_diff(lon_after, lon_now)
-
-    # Стационарность = смена направления
-    return (dir_before > 0 and dir_after < 0) or (dir_before < 0 and dir_after > 0)
+from astro_shared import (
+    DB_PATH, ECLIPSES, ECLIPSE_DATES, ZODIAC_SIGNS,
+    apply_bh_correction, ecliptic_lon_deg, get_zodiac_sign,
+    is_retrograde as _is_retrograde,
+    is_stationary as _is_stationary,
+)
 
 
 def get_full_astro(date):
@@ -409,17 +373,16 @@ def analyze_stations(pdf, bdf):
     print("3. СТАЦИОНАРНЫЕ ПЛАНЕТЫ (смена ретро↔директ)")
     print("=" * 90)
 
+    station_records = []
+
     station_pivot = pdf["any_station"].sum()
     station_base = bdf["any_station"].mean() * 100
     station_pct = station_pivot / len(pdf) * 100
 
     p_val = stats.binomtest(int(station_pivot), len(pdf), bdf["any_station"].mean()).pvalue
-    sig = " *" if p_val < 0.05 else ""
-
-    print(f"\n  Любая планета стационарная:")
-    print(f"    При разворотах: {station_pivot}/{len(pdf)} ({station_pct:.1f}%)")
-    print(f"    Baseline: {station_base:.1f}%")
-    print(f"    p-value: {p_val:.4f}{sig}")
+    station_records.append({"name": "Любая планета", "p_cnt": int(station_pivot),
+                            "p_pct": station_pct, "b_pct": station_base, "p_value": p_val,
+                            "details": []})
 
     for planet, col in [
         ("Меркурий", "mercury_station"), ("Венера", "venus_station"),
@@ -430,13 +393,27 @@ def analyze_stations(pdf, bdf):
         p_pct = p_cnt / len(pdf) * 100
         if p_cnt > 0:
             p_v = stats.binomtest(int(p_cnt), len(pdf), max(bdf[col].mean(), 0.001)).pvalue
-            sig = " *" if p_v < 0.05 else ""
-            print(f"\n  {planet} стационарный: {p_cnt}/{len(pdf)} ({p_pct:.1f}%) vs {b_pct:.1f}%  p={p_v:.4f}{sig}")
+            details = []
+            station_pivots = pdf[pdf[col]]
+            for _, row in station_pivots.iterrows():
+                details.append(f"    → {row['date'].strftime('%Y-%m-%d')} ${row['price']:,.0f} {row['pivot_type']}")
+            station_records.append({"name": planet, "p_cnt": int(p_cnt),
+                                    "p_pct": p_pct, "b_pct": b_pct, "p_value": p_v,
+                                    "details": details})
 
-            if p_cnt > 0:
-                station_pivots = pdf[pdf[col]]
-                for _, row in station_pivots.iterrows():
-                    print(f"    → {row['date'].strftime('%Y-%m-%d')} ${row['price']:,.0f} {row['pivot_type']}")
+    apply_bh_correction(station_records)
+
+    for rec in station_records:
+        sig = " *" if rec.get("q_value", 1.0) < 0.05 else ""
+        if rec["name"] == "Любая планета":
+            print(f"\n  Любая планета стационарная:")
+            print(f"    При разворотах: {rec['p_cnt']}/{len(pdf)} ({rec['p_pct']:.1f}%)")
+            print(f"    Baseline: {rec['b_pct']:.1f}%")
+            print(f"    p-value: {rec['p_value']:.4f}  q-value: {rec['q_value']:.4f}{sig}")
+        else:
+            print(f"\n  {rec['name']} стационарный: {rec['p_cnt']}/{len(pdf)} ({rec['p_pct']:.1f}%) vs {rec['b_pct']:.1f}%  p={rec['p_value']:.4f}  q={rec['q_value']:.4f}{sig}")
+            for line in rec["details"]:
+                print(line)
 
 
 # ============================================================
@@ -628,28 +605,47 @@ def analyze_lunar_days(pdf, bdf):
 
     all_days_list = sorted(set(list(pivot_days.keys()) + list(base_days.keys())))
 
-    print(f"\n  {'Лунный день':>12} {'Развороты':>10} {'Base%':>8} {'Ratio':>8}")
-
-    hot_days = []
+    # Collect p-values for all lunar days with enough data
+    lunar_records = []
     for day in all_days_list:
         p_cnt = pivot_days.get(day, 0)
-        b_pct = base_days.get(day, 0) / len(bdf) * 100
+        b_rate = base_days.get(day, 0) / len(bdf)
+        b_pct = b_rate * 100
         p_pct = p_cnt / len(pdf) * 100
-
         ratio = p_pct / max(b_pct, 0.1)
+
+        if p_cnt >= 2 and b_rate > 0:
+            p_val = stats.binomtest(p_cnt, len(pdf), b_rate).pvalue
+        else:
+            p_val = 1.0
+
+        lunar_records.append({"day": day, "p_cnt": p_cnt, "p_pct": p_pct,
+                              "b_pct": b_pct, "ratio": ratio, "p_value": p_val})
+
+    apply_bh_correction(lunar_records)
+
+    print(f"\n  {'Лунный день':>12} {'Развороты':>10} {'Base%':>8} {'Ratio':>8} {'p-value':>10} {'q-value':>10}")
+
+    hot_days = []
+    for rec in lunar_records:
+        day, p_cnt, p_pct, b_pct, ratio = rec["day"], rec["p_cnt"], rec["p_pct"], rec["b_pct"], rec["ratio"]
+        q_val = rec.get("q_value", 1.0)
+
         if p_cnt >= 3 and ratio > 1.5:
-            hot_days.append((day, p_cnt, p_pct, b_pct, ratio))
+            hot_days.append((day, p_cnt, p_pct, b_pct, ratio, q_val))
             marker = " <<<"
         else:
             marker = ""
 
         if p_cnt >= 2:
-            print(f"  {day:>12} {p_cnt:>5} ({p_pct:>4.1f}%) {b_pct:>6.1f}% {ratio:>7.2f}x{marker}")
+            sig = " *" if q_val < 0.05 else ""
+            print(f"  {day:>12} {p_cnt:>5} ({p_pct:>4.1f}%) {b_pct:>6.1f}% {ratio:>7.2f}x {rec['p_value']:>9.4f} {q_val:>9.4f}{sig}{marker}")
 
     if hot_days:
         print(f"\n  'Горячие' лунные дни (≥3 разворота, ratio > 1.5x):")
-        for day, cnt, p_pct, b_pct, ratio in hot_days:
-            print(f"    День {day}: {cnt} разворотов ({ratio:.1f}x от нормы)")
+        for day, cnt, p_pct, b_pct, ratio, q_val in hot_days:
+            sig = " (BH significant)" if q_val < 0.05 else ""
+            print(f"    День {day}: {cnt} разворотов ({ratio:.1f}x от нормы) q={q_val:.4f}{sig}")
 
 
 # ============================================================
@@ -790,21 +786,24 @@ def print_verdict(pdf, bdf, combo_results):
                 findings.append((f"Лунный день {day}", p_cnt / len(pdf) * 100, b_rate * 100, p))
 
     if findings:
-        findings.sort(key=lambda x: x[3])
-        print(f"\n  {'Фактор':<40} {'При разв.%':>10} {'Base%':>8} {'p-value':>10}")
-        print("  " + "-" * 72)
-        for name, pct, base, p in findings:
-            sig = "**" if p < 0.01 else "*"
-            print(f"  {name:<40} {pct:>8.1f}% {base:>6.1f}% {p:>10.4f} {sig}")
+        findings_records = [{"name": name, "pct": pct, "base": base, "p_value": p}
+                            for name, pct, base, p in findings]
+        apply_bh_correction(findings_records)
+        findings_records.sort(key=lambda x: x["q_value"])
 
-        bonferroni = 0.05 / 50  # примерно 50 тестов
-        survived = [f for f in findings if f[3] < bonferroni]
+        print(f"\n  {'Фактор':<40} {'При разв.%':>10} {'Base%':>8} {'p-value':>10} {'q-value':>10}")
+        print("  " + "-" * 82)
+        for rec in findings_records:
+            sig = "**" if rec["q_value"] < 0.01 else ("*" if rec["q_value"] < 0.05 else "")
+            print(f"  {rec['name']:<40} {rec['pct']:>8.1f}% {rec['base']:>6.1f}% {rec['p_value']:>10.4f} {rec['q_value']:>10.4f} {sig}")
+
+        survived = [r for r in findings_records if r["q_value"] < 0.05]
         if survived:
-            print(f"\n  Выжили после Бонферрони (α={bonferroni:.4f}):")
-            for name, pct, base, p in survived:
-                print(f"    {name}: p={p:.4f}")
+            print(f"\n  Выжили после BH-коррекции (q < 0.05):")
+            for rec in survived:
+                print(f"    {rec['name']}: p={rec['p_value']:.4f}, q={rec['q_value']:.4f}")
         else:
-            print(f"\n  После поправки Бонферрони (α={bonferroni:.4f}) ничего не выжило.")
+            print(f"\n  После BH-коррекции (q < 0.05) ничего не выжило.")
     else:
         print("\n  Значимых находок не обнаружено (p < 0.05).")
 
