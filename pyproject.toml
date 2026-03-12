@@ -6,11 +6,15 @@ readme = "README.md"
 packages = [
     { include = "research" },
     { include = "dashboard" },
+    { include = "backend" },
 ]
 
 [tool.poetry.dependencies]
 python = ">=3.12,<4.0"
 Flask = ">=3.0"
+fastapi = ">=0.115"
+uvicorn = {version = ">=0.34", extras = ["standard"]}
+cachetools = ">=5.5"
 matplotlib = ">=3.8"
 numpy = ">=1.26"
 pandas = ">=2.2"
@@ -21,6 +25,7 @@ yfinance = ">=0.2.54"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0"
+httpx = ">=0.28"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
