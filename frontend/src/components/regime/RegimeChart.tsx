@@ -6,6 +6,11 @@ import {
   PointElement, LineElement,
   Tooltip, Legend, Filler,
 } from 'chart.js';
+import type {
+  ChartData,
+  ChartOptions,
+  ScriptableLineSegmentContext,
+} from 'chart.js';
 import type { RegimeHistory } from '../../types/api';
 import { fmtDate } from '../../utils/dates';
 
@@ -16,7 +21,7 @@ interface Props {
 }
 
 export default function RegimeChart({ history }: Props) {
-  const chartData = useMemo(() => ({
+  const chartData = useMemo<ChartData<'line', number[], string>>(() => ({
     labels: history.map(h => h.date),
     datasets: [
       {
@@ -29,8 +34,10 @@ export default function RegimeChart({ history }: Props) {
         fill: 'origin' as const,
         backgroundColor: 'rgba(0,212,255,0.08)',
         segment: {
-          borderColor: (ctx: { p1: { parsed: { y: number } } }) =>
-            ctx.p1.parsed.y >= 0 ? 'rgba(0,255,136,0.85)' : 'rgba(255,59,92,0.85)',
+          borderColor: (ctx: ScriptableLineSegmentContext) =>
+            (ctx.p1.parsed.y ?? 0) >= 0
+              ? 'rgba(0,255,136,0.85)'
+              : 'rgba(255,59,92,0.85)',
         },
         borderColor: 'rgba(0,212,255,0.85)',
       },
@@ -68,7 +75,7 @@ export default function RegimeChart({ history }: Props) {
     ],
   }), [history]);
 
-  const options = useMemo(() => ({
+  const options = useMemo<ChartOptions<'line'>>(() => ({
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: 'index' as const, intersect: false },
@@ -133,7 +140,7 @@ export default function RegimeChart({ history }: Props) {
 
   return (
     <div className="chart-box chart-box-lg">
-      <Line data={chartData} options={options as never} />
+      <Line data={chartData} options={options} />
     </div>
   );
 }
