@@ -90,6 +90,27 @@ def save_daily_to_db(conn: sqlite3.Connection, df: pd.DataFrame):
     print(f"Сохранено {len(records)} дневных свечей в БД.")
 
 
+def load_existing_daily_from_db(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Возвращает уже сохранённый OHLCV snapshot из btc_daily в формате yfinance."""
+    df = pd.read_sql_query(
+        "SELECT date, open, high, low, close, volume FROM btc_daily ORDER BY date",
+        conn,
+        parse_dates=["date"],
+    )
+    if df.empty:
+        return pd.DataFrame()
+    df = df.set_index("date")
+    return df.rename(
+        columns={
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+            "volume": "Volume",
+        }
+    )
+
+
 def zigzag(prices: pd.Series, threshold) -> list[dict]:
     """
     Zigzag-алгоритм: находит развороты где цена отклонилась
@@ -360,10 +381,18 @@ def main():
 
     # 2. Загрузка данных
     df_ohlcv = download_btc_data("2016-01-01")
+    if df_ohlcv.empty:
+        print("yfinance вернул пустой набор. Использую текущий snapshot из btc_daily.")
+        df_ohlcv = load_existing_daily_from_db(conn)
+        if df_ohlcv.empty:
+            conn.close()
+            raise RuntimeError("Нет свежих данных из yfinance и btc_daily тоже пустая.")
+
     prices = df_ohlcv["Close"].squeeze()
 
     # 3. Сохраняем дневные цены в БД
-    save_daily_to_db(conn, df_ohlcv)
+    if not df_ohlcv.empty and "Open" in df_ohlcv.columns:
+        save_daily_to_db(conn, df_ohlcv)
 
     # 3b. Строим market-features для режима рынка
     market_features_df, derivatives_history_df = build_market_features(df_ohlcv)

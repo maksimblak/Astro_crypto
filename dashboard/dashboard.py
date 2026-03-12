@@ -11,6 +11,11 @@ import numpy as np
 from flask import Flask, Response, jsonify, render_template
 
 try:
+    from .auto_update import load_update_status, start_auto_updater
+except ImportError:
+    from auto_update import load_update_status, start_auto_updater
+
+try:
     from .market_regime import build_regime_payload
 except ImportError:
     from market_regime import build_regime_payload
@@ -109,6 +114,11 @@ def index():
 @app.route("/favicon.ico")
 def favicon():
     return Response(status=204)
+
+
+@app.route("/api/update-status")
+def api_update_status():
+    return jsonify(load_update_status())
 
 
 @app.route("/api/calendar")
@@ -313,4 +323,5 @@ def api_stats():
 
 
 if __name__ == "__main__":
+    start_auto_updater()
     app.run(host="0.0.0.0", port=5000)
