@@ -5,11 +5,12 @@ import os
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 
-from skyfield.api import load, Topos
+from skyfield.api import Loader, Topos
 from skyfield.framelib import ecliptic_frame
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "btc_research.duckdb")
+_sky_loader = Loader(os.path.join(BASE_DIR, "data"))
 
 ZODIAC_SIGNS = [
     "Овен", "Телец", "Близнецы", "Рак",
@@ -76,8 +77,8 @@ ECLIPSE_DATES = [datetime.strptime(event_date, "%Y-%m-%d") for event_date, _ in 
 # ---------------------------------------------------------------------------
 # Skyfield globals (loaded once)
 # ---------------------------------------------------------------------------
-_eph = load("de421.bsp")
-_ts = load.timescale()
+_eph = _sky_loader("de421.bsp")
+_ts = _sky_loader.timescale()
 _earth = _eph["earth"]
 _sun = _eph["sun"]
 _moon = _eph["moon"]

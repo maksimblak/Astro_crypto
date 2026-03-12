@@ -155,7 +155,7 @@ def get_astro_for_date(date):
 def load_pivots():
     """Загружает точки разворота из БД."""
     conn = duckdb.connect(DB_PATH)
-    df = pd.read_sql(f"""
+    df = pd.read_sql_query(f"""
         SELECT date, price, type, pct_change
         FROM btc_pivots
         WHERE date >= '{START_DATE}' AND date <= '{END_DATE}'
@@ -169,7 +169,7 @@ def load_pivots():
 def load_all_days():
     """Загружает все торговые дни для сравнения (baseline)."""
     conn = duckdb.connect(DB_PATH)
-    df = pd.read_sql(f"""
+    df = pd.read_sql_query(f"""
         SELECT date, close FROM btc_daily
         WHERE date >= '{START_DATE}' AND date <= '{END_DATE}'
         ORDER BY date

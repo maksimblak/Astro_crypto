@@ -374,8 +374,10 @@ def save_market_features_to_db(conn: duckdb.DuckDBPyConnection, features_df: pd.
     column_sql = ", ".join(columns)
     conn.executemany(
         f"""
-        INSERT OR REPLACE INTO btc_market_features ({column_sql})
+        INSERT INTO btc_market_features ({column_sql})
         VALUES ({placeholders})
+        ON CONFLICT (date) DO UPDATE SET
+        {', '.join(f'{c}=EXCLUDED.{c}' for c in columns if c != 'date')}
         """,
         records,
     )

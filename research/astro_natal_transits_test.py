@@ -151,8 +151,8 @@ def load_market_data(start: str | None, end: str | None) -> tuple[pd.DataFrame, 
     pivots_query += " ORDER BY date"
 
     with duckdb.connect(DB_PATH) as conn:
-        daily_df = pd.read_sql(daily_query, conn, params=params)
-        pivots_df = pd.read_sql(pivots_query, conn, params=params)
+        daily_df = pd.read_sql_query(daily_query, conn, params=params)
+        pivots_df = pd.read_sql_query(pivots_query, conn, params=params)
 
     daily_df["date"] = pd.to_datetime(daily_df["date"])
     pivots_df["date"] = pd.to_datetime(pivots_df["date"])

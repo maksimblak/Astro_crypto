@@ -86,7 +86,9 @@ def save_daily_to_db(conn: duckdb.DuckDBPyConnection, df: pd.DataFrame):
             round(float(row["Volume"]), 0),
         ))
     conn.executemany(
-        "INSERT OR REPLACE INTO btc_daily (date, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO btc_daily (date, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (date) DO UPDATE SET open=EXCLUDED.open, high=EXCLUDED.high, "
+        "low=EXCLUDED.low, close=EXCLUDED.close, volume=EXCLUDED.volume",
         records
     )
     conn.commit()

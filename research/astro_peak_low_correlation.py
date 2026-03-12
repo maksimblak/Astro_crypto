@@ -188,12 +188,12 @@ def compute_astro(date: datetime) -> dict:
 
 def load_data():
     conn = duckdb.connect(DB_PATH)
-    pivots = pd.read_sql(
+    pivots = pd.read_sql_query(
         f"SELECT date, price, type, pct_change FROM btc_pivots "
         f"WHERE date >= '{START_DATE}' AND date <= '{END_DATE}' ORDER BY date",
         conn,
     )
-    all_days = pd.read_sql(
+    all_days = pd.read_sql_query(
         f"SELECT date, close FROM btc_daily "
         f"WHERE date >= '{START_DATE}' AND date <= '{END_DATE}' ORDER BY date",
         conn,

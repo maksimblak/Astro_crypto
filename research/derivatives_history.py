@@ -96,7 +96,7 @@ def save_derivatives_history_to_db(conn: duckdb.DuckDBPyConnection, derivatives_
     ]
     conn.executemany(
         """
-        INSERT OR REPLACE INTO btc_derivatives_history (
+        INSERT INTO btc_derivatives_history (
             date,
             source,
             funding_rate_daily,
@@ -104,6 +104,11 @@ def save_derivatives_history_to_db(conn: duckdb.DuckDBPyConnection, derivatives_
             perp_premium_daily,
             source_version
         ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (date, source) DO UPDATE SET
+            funding_rate_daily=EXCLUDED.funding_rate_daily,
+            open_interest_value=EXCLUDED.open_interest_value,
+            perp_premium_daily=EXCLUDED.perp_premium_daily,
+            source_version=EXCLUDED.source_version
         """,
         records,
     )

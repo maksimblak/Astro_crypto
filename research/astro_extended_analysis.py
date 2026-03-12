@@ -296,12 +296,12 @@ def get_extended_astro(date):
 
 def load_data():
     conn = duckdb.connect(DB_PATH)
-    pivots = pd.read_sql("""
+    pivots = pd.read_sql_query("""
         SELECT date, price, type, pct_change
         FROM btc_pivots
         ORDER BY date
     """, conn)
-    all_days = pd.read_sql("""
+    all_days = pd.read_sql_query("""
         SELECT date, close
         FROM btc_daily
         ORDER BY date

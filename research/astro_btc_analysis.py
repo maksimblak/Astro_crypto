@@ -33,7 +33,7 @@ from astro_shared import (
 
 def load_btc_data() -> pd.DataFrame:
     conn = duckdb.connect(DB_PATH)
-    df = pd.read_sql("""
+    df = pd.read_sql_query("""
         SELECT date, open, high, low, close, volume
         FROM btc_daily
         ORDER BY date
