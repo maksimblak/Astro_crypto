@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sqlite3
+import duckdb
 from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -146,7 +146,7 @@ def load_market_data(start: str | None, end: str | None) -> tuple[pd.DataFrame, 
     daily_query += " ORDER BY date"
     pivots_query += " ORDER BY date"
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with duckdb.connect(DB_PATH) as conn:
         daily_df = pd.read_sql(daily_query, conn, params=params)
         pivots_df = pd.read_sql(pivots_query, conn, params=params)
 

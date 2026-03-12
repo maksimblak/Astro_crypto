@@ -10,7 +10,7 @@ BTC x Астрология: Корреляционный анализ BTC
 5. Аспекты планет (Юпитер-Сатурн, Марс-Юпитер и др.)
 """
 
-import sqlite3
+import duckdb
 import ephem
 import math
 import pandas as pd
@@ -28,7 +28,7 @@ from astro_shared import DB_PATH, ZODIAC_SIGNS, get_zodiac_sign
 # ============================================================
 
 def load_btc_data() -> pd.DataFrame:
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     df = pd.read_sql("""
         SELECT date, open, high, low, close, volume
         FROM btc_daily
@@ -701,7 +701,7 @@ def main():
     plot_results(df, moon_results, mercury_results, eclipse_results, signs_df)
 
     # Сохраняем в БД
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS btc_astro (
             date TEXT PRIMARY KEY,

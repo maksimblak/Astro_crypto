@@ -1,6 +1,5 @@
 """Astro endpoints: /api/today, /api/calendar, /api/stats."""
 
-import sqlite3
 from datetime import date
 
 import numpy as np
@@ -71,9 +70,9 @@ def api_today():
                 row = conn.execute(
                     f"SELECT {_CALENDAR_FIELDS} FROM btc_astro_calendar ORDER BY date DESC LIMIT 1"
                 ).fetchone()
-        except sqlite3.OperationalError:
+        except Exception:
             raise HTTPException(404, "Calendar not generated yet.")
-    return dict(row) if row else {}
+    return row if row else {}
 
 
 @router.get("/calendar")
@@ -83,9 +82,9 @@ def api_calendar():
             rows = conn.execute(
                 f"SELECT {_CALENDAR_FIELDS} FROM btc_astro_calendar ORDER BY date"
             ).fetchall()
-        except sqlite3.OperationalError:
+        except Exception:
             raise HTTPException(404, "Table btc_astro_calendar not found. Run astro_scoring.py first.")
-    return [dict(r) for r in rows]
+    return rows
 
 
 @router.get("/stats")
@@ -96,7 +95,7 @@ def api_stats():
                 "SELECT MIN(date) as start_date, MAX(date) as end_date, COUNT(*) as total_days "
                 "FROM btc_astro_history WHERE sample_split = 'test'"
             ).fetchone()
-        except sqlite3.OperationalError:
+        except Exception:
             raise HTTPException(404, "Table btc_astro_history not found. Run astro_scoring.py first.")
 
         base_scores = [

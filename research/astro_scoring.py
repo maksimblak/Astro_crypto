@@ -11,7 +11,7 @@ BTC Астро-скоринг: честная train/holdout-модель для 
 import hashlib
 import json
 import math
-import sqlite3
+import duckdb
 from datetime import datetime, timedelta
 from functools import lru_cache
 
@@ -370,7 +370,7 @@ def extract_astro_profile(date, eclipse_dates=None):
 
 
 def load_historical_data():
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     pivots = pd.read_sql(
         """
         SELECT date, price, type, pct_change
@@ -1103,10 +1103,10 @@ def _model_fingerprint(model: dict) -> str:
 def save_model_metadata(model: dict, split_date: str, train_metrics: dict, test_metrics: dict):
     """Сохраняет версию модели в БД для отслеживания и отката."""
     fingerprint = _model_fingerprint(model)
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS btc_model_versions ("
-        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  id INTEGER PRIMARY KEY,"
         "  fingerprint TEXT NOT NULL,"
         "  created_at TEXT NOT NULL,"
         "  split_date TEXT,"
@@ -1152,7 +1152,7 @@ def save_model_metadata(model: dict, split_date: str, train_metrics: dict, test_
 
 
 def save_calendar_to_db(calendar_df):
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     rows = []
     for _, row in calendar_df.iterrows():
         rows.append(
@@ -1186,7 +1186,7 @@ def save_calendar_to_db(calendar_df):
 
 
 def save_history_to_db(history_df):
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     rows = []
     for _, row in history_df.iterrows():
         rows.append(

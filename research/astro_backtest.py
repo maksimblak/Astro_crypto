@@ -9,7 +9,7 @@ Walk-forward бэктест астро-скоринговой модели.
 5. Сравниваем с random baseline (permutation test).
 """
 
-import sqlite3
+import duckdb
 from datetime import datetime, timedelta
 
 import matplotlib

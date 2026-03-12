@@ -4,7 +4,7 @@ BTC x Астрология: Глубокий анализ корреляций
 окно ±3 дня, повторяющиеся астро-сигнатуры.
 """
 
-import sqlite3
+import duckdb
 import ephem
 import math
 import pandas as pd
@@ -144,7 +144,7 @@ def get_full_astro(date):
 # ============================================================
 
 def load_data():
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     pivots = pd.read_sql("""
         SELECT date, price, type, pct_change
         FROM btc_pivots

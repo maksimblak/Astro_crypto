@@ -5,7 +5,7 @@ BTC x Астрология: Расширенный анализ V2
 Глубокий комбинаторный поиск корреляций.
 """
 
-import sqlite3
+import duckdb
 import ephem
 import math
 import pandas as pd
@@ -295,7 +295,7 @@ def get_extended_astro(date):
 # ============================================================
 
 def load_data():
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     pivots = pd.read_sql("""
         SELECT date, price, type, pct_change
         FROM btc_pivots
@@ -1049,8 +1049,8 @@ def print_verdict(pdf, bdf, combo_results):
 
 
 def save_to_db(pdf, bdf):
-    """Сохраняем расширенные астро-данные в SQLite."""
-    conn = sqlite3.connect(DB_PATH)
+    """Сохраняем расширенные астро-данные в DuckDB."""
+    conn = duckdb.connect(DB_PATH)
 
     # Таблица расширенных астро-данных для разворотов
     pivot_rows = []

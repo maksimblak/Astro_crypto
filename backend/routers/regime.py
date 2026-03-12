@@ -1,6 +1,5 @@
 """Regime endpoint: /api/regime with TTL cache."""
 
-import sqlite3
 import threading
 
 from cachetools import TTLCache
@@ -25,13 +24,13 @@ _DESIRED_FEATURE_COLUMNS = [
 ]
 
 
-def _market_feature_select_sql(conn: sqlite3.Connection) -> str:
+def _market_feature_select_sql(conn) -> str:
     try:
         existing = {
             row["name"]
             for row in conn.execute("PRAGMA table_info(btc_market_features)").fetchall()
         }
-    except sqlite3.OperationalError:
+    except Exception:
         return ""
 
     parts = []
@@ -59,12 +58,12 @@ def api_regime():
                 " LEFT JOIN btc_market_features f ON f.date = d.date"
                 " ORDER BY d.date"
             ).fetchall()
-        except sqlite3.OperationalError:
+        except Exception:
             try:
                 rows = conn.execute(
                     "SELECT date, open, high, low, close, volume FROM btc_daily ORDER BY date"
                 ).fetchall()
-            except sqlite3.OperationalError:
+            except Exception:
                 raise HTTPException(404, "Table btc_daily not found. Run research/main.py first.")
 
     if not rows:

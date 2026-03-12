@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 from pathlib import Path
 
 import pandas as pd
@@ -30,7 +30,7 @@ CONTEXT_SCORE_NAME = "context_score_v2"
 
 
 def load_feature_frame() -> pd.DataFrame:
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     try:
         df = pd.read_sql_query(
             """

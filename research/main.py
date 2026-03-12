@@ -1,11 +1,11 @@
 """
 BTC Research: Пики и Дно 2016-2026
 Zigzag-алгоритм для поиска разворотов с порогами 10% (локальные) и 20% (крупные).
-Данные сохраняются в SQLite (btc_research.db) и CSV.
+Данные сохраняются в DuckDB (btc_research.duckdb) и CSV.
 """
 
 import os
-import sqlite3
+import duckdb
 import yfinance as yf
 import pandas as pd
 import matplotlib
@@ -20,12 +20,12 @@ from market_features import build_market_features, save_market_features_to_db
 
 logger = get_logger(__name__)
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.duckdb")
 
 
 def init_db():
-    """Создаёт таблицы в SQLite."""
-    conn = sqlite3.connect(DB_PATH)
+    """Создаёт таблицы в DuckDB."""
+    conn = duckdb.connect(DB_PATH)
     c = conn.cursor()
 
     # Таблица дневных цен
@@ -43,7 +43,7 @@ def init_db():
     # Таблица пиков и дно
     c.execute("""
         CREATE TABLE IF NOT EXISTS btc_pivots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id INTEGER PRIMARY KEY,
             date TEXT NOT NULL,
             price REAL NOT NULL,
             type TEXT NOT NULL,
@@ -73,8 +73,8 @@ def download_btc_data(start: str = "2016-01-01", end: str | None = None) -> pd.D
     return df
 
 
-def save_daily_to_db(conn: sqlite3.Connection, df: pd.DataFrame):
-    """Сохраняет дневные цены в SQLite."""
+def save_daily_to_db(conn: duckdb.DuckDBPyConnection, df: pd.DataFrame):
+    """Сохраняет дневные цены в DuckDB."""
     records = []
     for date, row in df.iterrows():
         records.append((
@@ -93,7 +93,7 @@ def save_daily_to_db(conn: sqlite3.Connection, df: pd.DataFrame):
     logger.info(f"Сохранено {len(records)} дневных свечей в БД.")
 
 
-def load_existing_daily_from_db(conn: sqlite3.Connection) -> pd.DataFrame:
+def load_existing_daily_from_db(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     """Возвращает уже сохранённый OHLCV snapshot из btc_daily в формате yfinance."""
     df = pd.read_sql_query(
         "SELECT date, open, high, low, close, volume FROM btc_daily ORDER BY date",
@@ -257,8 +257,8 @@ def classify_points(
     return df
 
 
-def save_pivots_to_db(conn: sqlite3.Connection, df: pd.DataFrame):
-    """Сохраняет пики/дно в SQLite."""
+def save_pivots_to_db(conn: duckdb.DuckDBPyConnection, df: pd.DataFrame):
+    """Сохраняет пики/дно в DuckDB."""
     conn.execute("DELETE FROM btc_pivots")
     records = []
     for _, row in df.iterrows():
@@ -303,10 +303,10 @@ def print_results(df: pd.DataFrame):
     print(f"\nВсего: {len(df)} точек (major/global: {len(major)}, local: {len(local)})")
 
 
-def print_db_examples(conn: sqlite3.Connection):
+def print_db_examples(conn: duckdb.DuckDBPyConnection):
     """Показывает примеры SQL-запросов к базе."""
     print("\n" + "=" * 85)
-    print("ПРИМЕРЫ SQL-ЗАПРОСОВ К btc_research.db")
+    print("ПРИМЕРЫ SQL-ЗАПРОСОВ К btc_research.duckdb")
     print("=" * 85)
 
     queries = [
@@ -425,7 +425,7 @@ def main():
 
     conn.close()
     logger.info(f"БД сохранена: {DB_PATH}")
-    print("Подключение: sqlite3 btc_research.db")
+    print("Подключение: duckdb btc_research.duckdb")
 
 
 if __name__ == "__main__":

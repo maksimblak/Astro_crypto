@@ -8,7 +8,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 CHARTS_DIR = BASE_DIR / "charts"
-DB_PATH = str(DATA_DIR / "btc_research.db")
+DB_PATH = str(DATA_DIR / "btc_research.duckdb")
 
 # --- Market data ---
 BTC_TICKER = "BTC-USD"

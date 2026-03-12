@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import sqlite3
+import duckdb
 import time
 from datetime import datetime, timezone
 
@@ -110,7 +110,7 @@ def _load_existing_feature_snapshot(start_date: str, end_date: str) -> pd.DataFr
         "SELECT date, wiki_views, fear_greed_value, unique_addresses, tx_count "
         "FROM btc_market_features WHERE date >= ? AND date <= ? ORDER BY date"
     )
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     try:
         df = pd.read_sql_query(query, conn, params=[start_date, end_date])
     except Exception:
@@ -128,7 +128,7 @@ def _load_derivatives_history_from_db(start_date: str, end_date: str) -> pd.Data
         "perp_premium_daily, source_version "
         "FROM btc_derivatives_history WHERE date >= ? AND date <= ? ORDER BY date, source"
     )
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     try:
         return pd.read_sql_query(query, conn, params=[start_date, end_date])
     except Exception:
@@ -218,7 +218,7 @@ def fetch_non_derivative_frames(start_date: str, end_date: str) -> list[pd.DataF
     return frames
 
 
-def init_market_features_table(conn: sqlite3.Connection):
+def init_market_features_table(conn: duckdb.DuckDBPyConnection):
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS btc_market_features (
@@ -366,7 +366,7 @@ def build_market_features(df_ohlcv: pd.DataFrame) -> tuple[pd.DataFrame, pd.Data
     return features.replace({np.nan: None}), derivatives_history_df.replace({np.nan: None})
 
 
-def save_market_features_to_db(conn: sqlite3.Connection, features_df: pd.DataFrame):
+def save_market_features_to_db(conn: duckdb.DuckDBPyConnection, features_df: pd.DataFrame):
     init_market_features_table(conn)
     columns = list(MARKET_FEATURE_COLUMNS.keys())
     records = [tuple(row[column] for column in columns) for _, row in features_df.iterrows()]
@@ -382,7 +382,7 @@ def save_market_features_to_db(conn: sqlite3.Connection, features_df: pd.DataFra
     conn.commit()
 
 
-def load_daily_from_db(conn: sqlite3.Connection) -> pd.DataFrame:
+def load_daily_from_db(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     df = pd.read_sql_query(
         "SELECT date, open, high, low, close, volume FROM btc_daily ORDER BY date",
         conn,
@@ -394,7 +394,7 @@ def load_daily_from_db(conn: sqlite3.Connection) -> pd.DataFrame:
 
 
 def main():
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     try:
         daily_df = load_daily_from_db(conn)
         features_df, derivatives_history_df = build_market_features(daily_df)

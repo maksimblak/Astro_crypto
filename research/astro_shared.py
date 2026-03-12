@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 import ephem
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "data", "btc_research.db")
+DB_PATH = os.path.join(BASE_DIR, "data", "btc_research.duckdb")
 
 ZODIAC_SIGNS = [
     "Овен", "Телец", "Близнецы", "Рак",

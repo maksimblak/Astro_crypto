@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import io
-import sqlite3
+import duckdb
 import time
 import zipfile
 from datetime import datetime, timezone
@@ -57,7 +57,7 @@ def _month_iter(start_date: str, end_date: str) -> list[str]:
     return months
 
 
-def init_derivatives_history_table(conn: sqlite3.Connection):
+def init_derivatives_history_table(conn: duckdb.DuckDBPyConnection):
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS btc_derivatives_history (
@@ -78,7 +78,7 @@ def init_derivatives_history_table(conn: sqlite3.Connection):
     conn.commit()
 
 
-def save_derivatives_history_to_db(conn: sqlite3.Connection, derivatives_df: pd.DataFrame):
+def save_derivatives_history_to_db(conn: duckdb.DuckDBPyConnection, derivatives_df: pd.DataFrame):
     if derivatives_df.empty:
         return
 

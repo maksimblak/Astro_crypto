@@ -4,7 +4,7 @@ BTC x Астрология: Анализ разворотных точек
 Находим паттерны которые чаще совпадают с разворотами.
 """
 
-import sqlite3
+import duckdb
 import ephem
 import math
 import pandas as pd
@@ -155,7 +155,7 @@ def get_astro_for_date(date):
 
 def load_pivots():
     """Загружает точки разворота из БД."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     df = pd.read_sql(f"""
         SELECT date, price, type, pct_change
         FROM btc_pivots
@@ -169,7 +169,7 @@ def load_pivots():
 
 def load_all_days():
     """Загружает все торговые дни для сравнения (baseline)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     df = pd.read_sql(f"""
         SELECT date, close FROM btc_daily
         WHERE date >= '{START_DATE}' AND date <= '{END_DATE}'
@@ -569,7 +569,7 @@ def main():
     plt.close()
 
     # Сохраняем в БД
-    conn = sqlite3.connect(DB_PATH)
+    conn = duckdb.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS btc_pivot_astro (
             date TEXT PRIMARY KEY,
