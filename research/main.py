@@ -23,6 +23,27 @@ logger = get_logger(__name__)
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.duckdb")
 
 
+def _ensure_primary_key(conn, table: str, pk_cols: list[str]):
+    """Re-create table with PRIMARY KEY if missing (DuckDB has no ALTER ADD PK)."""
+    rows = conn.execute(
+        "SELECT constraint_type FROM duckdb_constraints() WHERE table_name = ?", [table]
+    ).fetchall()
+    has_pk = any(r[0] == "PRIMARY KEY" for r in rows)
+    if has_pk:
+        return
+    # Table exists but without PK — rebuild
+    tmp = f"{table}__tmp"
+    conn.execute(f"ALTER TABLE {table} RENAME TO {tmp}")
+    cols = conn.execute(f"PRAGMA table_info('{tmp}')").fetchall()
+    col_defs = ", ".join(
+        f"{c[1]} {c[2]}" + (" PRIMARY KEY" if c[1] in pk_cols else "") for c in cols
+    )
+    conn.execute(f"CREATE TABLE {table} ({col_defs})")
+    conn.execute(f"INSERT INTO {table} SELECT * FROM {tmp}")
+    conn.execute(f"DROP TABLE {tmp}")
+    conn.commit()
+
+
 def init_db():
     """Создаёт таблицы в DuckDB."""
     conn = duckdb.connect(DB_PATH)
@@ -57,6 +78,10 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_pivots_date ON btc_pivots(date)")
 
     conn.commit()
+
+    # Fix tables missing PRIMARY KEY (created before constraint was added)
+    _ensure_primary_key(conn, "btc_daily", ["date"])
+
     return conn
 
 
