@@ -1,4 +1,13 @@
-import type { TodayData, CalendarDay, DailyPrice, PivotPoint, StatsData, RegimeData, UpdateStatus } from '../types/api';
+import type {
+  TodayData,
+  CalendarDay,
+  DailyPrice,
+  PivotPoint,
+  StatsData,
+  RegimeData,
+  CycleData,
+  UpdateStatus,
+} from '../types/api';
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -13,5 +22,6 @@ export const api = {
   pivots: () => fetchJson<PivotPoint[]>('/api/pivots'),
   stats: () => fetchJson<StatsData>('/api/stats'),
   regime: () => fetchJson<RegimeData>('/api/regime'),
+  cycle: () => fetchJson<CycleData>('/api/cycle'),
   updateStatus: () => fetchJson<UpdateStatus>('/api/update-status'),
 };

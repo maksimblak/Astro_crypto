@@ -340,6 +340,62 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
 .signal-value.neutral { color: var(--text); }
 .signal-note { margin-top: 6px; font-size: 12px; color: var(--text2); line-height: 1.45; }
 
+/* Cycle */
+.cycle-overview { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.cycle-main {
+  flex: 0 0 320px;
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  border: 1px solid var(--border-glow);
+  background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+}
+.cycle-main.bull {
+  background: linear-gradient(135deg, rgba(0,255,136,0.12), rgba(0,212,255,0.05));
+}
+.cycle-main.bear {
+  background: linear-gradient(135deg, rgba(255,59,92,0.12), rgba(245,158,11,0.05));
+}
+.cycle-main.neutral {
+  background: linear-gradient(135deg, rgba(59,130,246,0.10), rgba(0,212,255,0.04));
+}
+.cycle-kicker {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1.1px;
+  color: var(--text2); font-weight: 600;
+}
+.cycle-title {
+  font-size: 30px; line-height: 1.05; font-weight: 800;
+  margin-top: 8px; letter-spacing: -0.6px;
+}
+.cycle-copy { margin-top: 10px; font-size: 13px; color: var(--text2); max-width: 38ch; }
+.cycle-score-row {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px; margin-top: 18px;
+}
+.cycle-score-block {
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  background: rgba(10,14,23,0.36);
+}
+.cycle-score-block.top { border-left: 3px solid var(--bear); }
+.cycle-score-block.bottom { border-left: 3px solid var(--bull); }
+.cycle-score-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.9px;
+  color: var(--text2); font-weight: 700;
+}
+.cycle-score-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 34px; font-weight: 800; line-height: 1;
+  margin-top: 8px;
+}
+.cycle-score-block.top .cycle-score-value { color: var(--bear); }
+.cycle-score-block.bottom .cycle-score-value { color: var(--bull); }
+.cycle-metrics {
+  flex: 1;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
 /* Footer */
 .footer {
   text-align: center; padding: 40px 0 24px;

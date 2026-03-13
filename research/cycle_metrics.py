@@ -226,7 +226,10 @@ def _load_existing_cycle_snapshot(start_date: str, end_date: str) -> pd.DataFram
     query = (
         f"SELECT {columns} FROM btc_cycle_metrics WHERE date >= ? AND date <= ? ORDER BY date"
     )
-    conn = duckdb.connect(DB_PATH)
+    try:
+        conn = duckdb.connect(DB_PATH)
+    except duckdb.Error:
+        return pd.DataFrame(columns=["date", *PRESERVED_REMOTE_COLUMNS])
     try:
         df = pd.read_sql_query(query, conn, params=[start_date, end_date])
     except Exception:

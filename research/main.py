@@ -15,11 +15,13 @@ import matplotlib.dates as mdates
 
 try:
     from .config import BTC_START_DATE, DB_PATH, yfinance_exclusive_end
+    from .cycle_metrics import build_cycle_metrics, save_cycle_metrics_to_db
     from .derivatives_history import save_derivatives_history_to_db
     from .log import get_logger
     from .market_features import build_market_features, save_market_features_to_db
 except ImportError:
     from config import BTC_START_DATE, DB_PATH, yfinance_exclusive_end
+    from cycle_metrics import build_cycle_metrics, save_cycle_metrics_to_db
     from derivatives_history import save_derivatives_history_to_db
     from log import get_logger
     from market_features import build_market_features, save_market_features_to_db
@@ -436,6 +438,13 @@ def main():
     market_features_df, derivatives_history_df = build_market_features(df_ohlcv)
     save_market_features_to_db(conn, market_features_df)
     save_derivatives_history_to_db(conn, derivatives_history_df)
+
+    # 3c. Macro cycle layer for global top/bottom monitoring
+    try:
+        cycle_metrics_df = build_cycle_metrics(df_ohlcv)
+        save_cycle_metrics_to_db(conn, cycle_metrics_df)
+    except Exception as exc:  # pragma: no cover - defensive pipeline guard
+        logger.warning("Не удалось обновить btc_cycle_metrics: %s", exc)
 
     # 4. Поиск и классификация пиков/дно
     df = classify_points(prices, major_threshold=0.20, local_threshold=0.10)

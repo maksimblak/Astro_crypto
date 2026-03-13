@@ -1,6 +1,7 @@
 const sections = [
   { id: 'sectionCalendar', label: 'Календарь' },
   { id: 'sectionChart', label: 'График' },
+  { id: 'sectionCycle', label: 'Пики / Дно' },
   { id: 'sectionRegime', label: 'Режим' },
   { id: 'sectionRisk', label: 'Зоны риска' },
   { id: 'sectionStats', label: 'Статистика' },

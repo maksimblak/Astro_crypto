@@ -155,6 +155,54 @@ export interface RegimeData {
   error?: string;
 }
 
+export interface CycleMetrics {
+  mvrv_zscore?: number | null;
+  mvrv_top_threshold?: number | null;
+  mvrv_bottom_extreme?: number | null;
+  nupl?: number | null;
+  nupl_top_threshold?: number | null;
+  nupl_bottom_extreme?: number | null;
+  puell_multiple?: number | null;
+  puell_top_threshold?: number | null;
+  puell_bottom_extreme?: number | null;
+  pi_sma111?: number | null;
+  pi_sma350x2?: number | null;
+  pi_cycle_signal?: number | null;
+  hashrate_sma_30?: number | null;
+  hashrate_sma_60?: number | null;
+  hashribbon_trend?: string | null;
+  hashribbon_buy_signal?: number | null;
+}
+
+export interface CycleHistory {
+  date: string;
+  price?: number | null;
+  top_score: number;
+  bottom_score: number;
+  cycle_bias: number;
+  cycle_zone: string;
+  mvrv_zscore?: number | null;
+  nupl?: number | null;
+  puell_multiple?: number | null;
+  pi_cycle_signal?: number | null;
+  hashribbon_buy_signal?: number | null;
+}
+
+export interface CycleData {
+  as_of: string;
+  price?: number | null;
+  cycle_zone: string;
+  cycle_label: string;
+  cycle_tone: 'bull' | 'bear' | 'neutral';
+  summary: string;
+  top_score: number;
+  bottom_score: number;
+  cycle_bias: number;
+  metrics: CycleMetrics;
+  signals: Signal[];
+  history: CycleHistory[];
+}
+
 export interface UpdateStatus {
   enabled: boolean;
   running: boolean;

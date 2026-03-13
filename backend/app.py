@@ -14,7 +14,7 @@ _dashboard_dir = str(_project_root / "dashboard")
 if _dashboard_dir not in sys.path:
     sys.path.append(_dashboard_dir)
 
-from backend.routers import astro, market, regime, system  # noqa: E402
+from backend.routers import astro, cycle, market, regime, system  # noqa: E402
 
 
 @asynccontextmanager
@@ -39,6 +39,7 @@ app.add_middleware(
 )
 
 app.include_router(astro.router, prefix="/api")
+app.include_router(cycle.router, prefix="/api")
 app.include_router(market.router, prefix="/api")
 app.include_router(regime.router, prefix="/api")
 app.include_router(system.router, prefix="/api")

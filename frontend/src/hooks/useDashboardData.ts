@@ -26,3 +26,7 @@ export function useStats() {
 export function useRegime() {
   return useQuery({ queryKey: ['regime'], queryFn: api.regime, staleTime: STALE });
 }
+
+export function useCycle() {
+  return useQuery({ queryKey: ['cycle'], queryFn: api.cycle, staleTime: STALE });
+}
