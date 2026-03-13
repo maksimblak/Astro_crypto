@@ -197,6 +197,8 @@ export interface CycleProjections {
     band_2sigma: [number, number];
     position: number;
     r_squared: number;
+    slope: number;
+    intercept: number;
     fair_at_projected_peak: number;
     band_at_projected_peak: [number, number];
   };
@@ -216,13 +218,23 @@ export interface CycleProjections {
     peak_window_early: string;
     peak_window_late: string;
     days_to_projected_peak: number;
+    halving_model: {
+      history: { halving: string; peak: string; days: number; confirmed: boolean }[];
+      avg_days: number;
+      std_days: number;
+      recent_cycles_used: number;
+    };
     top_to_top_avg_days: number;
     top_to_top_projection: string;
     next_halving_est: string;
   };
   diminishing_returns: {
     cycle_rois: { cycle: number; bottom: number; top: number; roi_x: number }[];
+    decay_factors: number[];
     avg_decay: number;
+    current_cycle_bottom: number;
+    current_cycle_top: number;
+    current_cycle_roi_x: number;
     projected_next_roi_x: number;
     projected_next_roi_conservative_x: number;
     projected_peak_from_bottom: number;
@@ -234,6 +246,8 @@ export interface CycleProjections {
   mayer_multiple: number | null;
   pi_cycle_distance: number | null;
   sma200: number;
+  sma111: number;
+  sma350x2: number;
   composite: {
     projected_peak_date: string;
     days_to_peak: number;

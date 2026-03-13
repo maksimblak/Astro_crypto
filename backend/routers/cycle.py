@@ -291,4 +291,6 @@ def _build_projections_safe() -> dict | None:
         df["close"] = pd.to_numeric(df["close"], errors="coerce")
         return build_projections(df)
     except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Failed to build cycle projections")
         return None

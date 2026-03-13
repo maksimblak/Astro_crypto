@@ -231,9 +231,9 @@ export default function CycleSection({ data, error }: Props) {
 
   const metrics = [
     { label: 'BTC', value: fmtUsd(data.price), sub: `на ${fmtDate(data.as_of)}` },
-    { label: 'Top score', value: `${(data.top_score * 100).toFixed(1)}%`, sub: 'Composite риск перегрева' },
-    { label: 'Bottom score', value: `${(data.bottom_score * 100).toFixed(1)}%`, sub: 'Composite вероятность дна' },
-    { label: 'Bias', value: `${data.cycle_bias > 0 ? '+' : ''}${(data.cycle_bias * 100).toFixed(1)}%`, sub: 'Top score минус bottom score' },
+    { label: 'Top score', value: `${((data.top_score ?? 0) * 100).toFixed(1)}%`, sub: 'Composite риск перегрева' },
+    { label: 'Bottom score', value: `${((data.bottom_score ?? 0) * 100).toFixed(1)}%`, sub: 'Composite вероятность дна' },
+    { label: 'Bias', value: `${(data.cycle_bias ?? 0) > 0 ? '+' : ''}${((data.cycle_bias ?? 0) * 100).toFixed(1)}%`, sub: 'Top score минус bottom score' },
     { label: 'MVRV Z', value: fmtNum(data.metrics?.mvrv_zscore, 2), sub: `top>${fmtNum(data.metrics?.mvrv_top_threshold, 2)} / bottom<${fmtNum(data.metrics?.mvrv_bottom_extreme, 2)}` },
     { label: 'NUPL', value: fmtNum(data.metrics?.nupl, 3), sub: `top>${fmtNum(data.metrics?.nupl_top_threshold, 3)} / bottom<${fmtNum(data.metrics?.nupl_bottom_extreme, 3)}` },
     { label: 'Puell', value: fmtNum(data.metrics?.puell_multiple, 3), sub: `top>${fmtNum(data.metrics?.puell_top_threshold, 2)} / bottom<${fmtNum(data.metrics?.puell_bottom_extreme, 2)}` },
@@ -261,18 +261,18 @@ export default function CycleSection({ data, error }: Props) {
             <div className="cycle-score-row">
               <div className="cycle-score-block top">
                 <div className="cycle-score-label">Top</div>
-                <div className="cycle-score-value">{(data.top_score * 100).toFixed(0)}%</div>
+                <div className="cycle-score-value">{((data.top_score ?? 0) * 100).toFixed(0)}%</div>
               </div>
               <div className="cycle-score-block bottom">
                 <div className="cycle-score-label">Bottom</div>
-                <div className="cycle-score-value">{(data.bottom_score * 100).toFixed(0)}%</div>
+                <div className="cycle-score-value">{((data.bottom_score ?? 0) * 100).toFixed(0)}%</div>
               </div>
             </div>
             <div className="regime-chips">
               <span className={`regime-chip ${toneClass}`}>{zoneLabel(data.cycle_zone)}</span>
               <span className="regime-chip neutral">{fmtUsd(data.price)}</span>
-              <span className={`regime-chip ${data.cycle_bias >= 0 ? 'bear' : 'bull'}`}>
-                Bias {data.cycle_bias > 0 ? '+' : ''}{(data.cycle_bias * 100).toFixed(1)}%
+              <span className={`regime-chip ${(data.cycle_bias ?? 0) >= 0 ? 'bear' : 'bull'}`}>
+                Bias {(data.cycle_bias ?? 0) > 0 ? '+' : ''}{((data.cycle_bias ?? 0) * 100).toFixed(1)}%
               </span>
             </div>
           </div>

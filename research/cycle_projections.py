@@ -29,13 +29,22 @@ HALVINGS = [
     date(2024, 4, 20),
 ]
 
-CYCLE_TOPS = [
+# Confirmed cycle tops (past cycles, verified)
+CYCLE_TOPS_CONFIRMED = [
     date(2011, 6, 8),
     date(2013, 12, 4),
     date(2017, 12, 17),
     date(2021, 11, 10),
-    date(2025, 1, 20),
 ]
+CYCLE_TOP_PRICES_CONFIRMED = [31.91, 1177.0, 19783.0, 69000.0]
+
+# Current ATH — NOT a confirmed cycle top (cycle may still be ongoing)
+CURRENT_ATH_DATE = date(2025, 1, 20)
+CURRENT_ATH_PRICE = 109114.0
+
+# All tops including current ATH (for display purposes)
+CYCLE_TOPS = [*CYCLE_TOPS_CONFIRMED, CURRENT_ATH_DATE]
+CYCLE_TOP_PRICES = [*CYCLE_TOP_PRICES_CONFIRMED, CURRENT_ATH_PRICE]
 
 CYCLE_BOTTOMS = [
     date(2011, 11, 18),
@@ -44,8 +53,10 @@ CYCLE_BOTTOMS = [
     date(2022, 11, 21),
 ]
 
-CYCLE_TOP_PRICES = [31.91, 1177.0, 19783.0, 69000.0, 109114.0]
 CYCLE_BOTTOM_PRICES = [2.01, 152.0, 3122.0, 15460.0]
+
+assert len(CYCLE_TOPS_CONFIRMED) == len(CYCLE_TOP_PRICES_CONFIRMED)
+assert len(CYCLE_BOTTOMS) == len(CYCLE_BOTTOM_PRICES)
 
 # Fibonacci levels used by Golden Ratio Multiplier (historically declining)
 GOLDEN_FIB_LEVELS = [21, 13, 8, 5, 3, 2, 1.618]
@@ -151,17 +162,17 @@ def golden_ratio_current_ceiling(sma350: float, cycle_index: int = 5) -> dict:
 # ── Halving Timing Model ──────────────────────────────────────────
 
 def halving_to_peak_stats() -> dict:
-    """Calculate average days from halving to cycle peak."""
-    # Pair halvings with subsequent tops
+    """Calculate average days from halving to cycle peak using CONFIRMED tops only."""
+    # Pair halvings with subsequent confirmed tops (exclude current unconfirmed ATH)
     pairs = []
     for halving in HALVINGS:
-        # Find the first top after this halving
-        for top in CYCLE_TOPS:
+        for top in CYCLE_TOPS_CONFIRMED:
             if top > halving:
                 pairs.append({
                     "halving": halving.isoformat(),
                     "peak": top.isoformat(),
                     "days": (top - halving).days,
+                    "confirmed": True,
                 })
                 break
 
@@ -197,12 +208,12 @@ def project_next_peak(reference_date: date | None = None) -> dict:
 
     days_to_peak = (projected_peak - reference_date).days
 
-    # Top-to-top model as cross-check
+    # Top-to-top model as cross-check (using confirmed tops only)
     top_to_top_days = []
-    for i in range(1, len(CYCLE_TOPS)):
-        top_to_top_days.append((CYCLE_TOPS[i] - CYCLE_TOPS[i - 1]).days)
+    for i in range(1, len(CYCLE_TOPS_CONFIRMED)):
+        top_to_top_days.append((CYCLE_TOPS_CONFIRMED[i] - CYCLE_TOPS_CONFIRMED[i - 1]).days)
     avg_top_to_top = int(np.mean(top_to_top_days)) if top_to_top_days else 1430
-    top_to_top_projection = CYCLE_TOPS[-1] + timedelta(days=avg_top_to_top)
+    top_to_top_projection = CYCLE_TOPS_CONFIRMED[-1] + timedelta(days=avg_top_to_top)
 
     # Next halving estimate (~4 years = 1460 days after last one, actually ~210000 blocks)
     next_halving_est = last_halving + timedelta(days=1461)
@@ -322,10 +333,20 @@ def build_projections(
 
     current_price = float(close.iloc[-1])
 
-    # Moving averages
-    sma200 = float(close.rolling(200, min_periods=200).mean().iloc[-1])
-    sma350 = float(close.rolling(350, min_periods=350).mean().iloc[-1])
-    sma111 = float(close.rolling(111, min_periods=111).mean().iloc[-1])
+    # Moving averages (with NaN guard)
+    sma200_raw = close.rolling(200, min_periods=200).mean().iloc[-1]
+    sma350_raw = close.rolling(350, min_periods=350).mean().iloc[-1]
+    sma111_raw = close.rolling(111, min_periods=111).mean().iloc[-1]
+
+    if any(np.isnan(v) for v in [sma200_raw, sma350_raw, sma111_raw]):
+        raise ValueError(
+            f"Insufficient data for SMA: sma200={sma200_raw}, sma350={sma350_raw}, "
+            f"sma111={sma111_raw}. Need at least 350 rows of non-NaN close prices."
+        )
+
+    sma200 = float(sma200_raw)
+    sma350 = float(sma350_raw)
+    sma111 = float(sma111_raw)
     sma350x2 = sma350 * 2.0
 
     # 1. Power Law
