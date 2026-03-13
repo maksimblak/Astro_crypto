@@ -1,4 +1,4 @@
-import type { CycleData, CycleHistory } from '../../types/api';
+import type { CycleData, CycleHistory, CycleProjections } from '../../types/api';
 import { fmtDate } from '../../utils/dates';
 import { fmtUsd, stressTone } from '../../utils/format';
 import SignalCard from '../regime/SignalCard';
@@ -34,6 +34,176 @@ function flaggedRows(history: CycleHistory[]): CycleHistory[] {
     .filter(point => point.top_score >= 0.45 || point.bottom_score >= 0.45 || point.pi_cycle_signal === 1 || point.hashribbon_buy_signal === 1)
     .slice(-12)
     .reverse();
+}
+
+function plPositionLabel(pos: number): string {
+  if (pos >= 0.85) return 'Сильно выше тренда';
+  if (pos >= 0.65) return 'Выше тренда';
+  if (pos >= 0.45) return 'На тренде';
+  if (pos >= 0.25) return 'Ниже тренда';
+  return 'Сильно ниже тренда';
+}
+
+function plPositionTone(pos: number): string {
+  if (pos >= 0.80) return 'bear';
+  if (pos >= 0.60) return 'neutral';
+  return 'bull';
+}
+
+function ProjectionBlock({ proj }: { proj: CycleProjections }) {
+  const pl = proj.power_law;
+  const gr = proj.golden_ratio;
+  const ht = proj.halving_timing;
+  const dr = proj.diminishing_returns;
+  const comp = proj.composite;
+
+  return (
+    <>
+      <div className="signal-section-title">Cycle Projections</div>
+
+      {/* Composite forecast summary */}
+      <div className="projection-summary">
+        <div className="projection-card highlight">
+          <div className="label">Прогноз пика</div>
+          <div className="value">{fmtDate(comp.projected_peak_date)}</div>
+          <div className="sub">
+            {comp.days_to_peak > 0
+              ? `Через ${comp.days_to_peak} дней`
+              : comp.days_to_peak === 0
+                ? 'Сегодня'
+                : `${Math.abs(comp.days_to_peak)} дней назад`}
+          </div>
+        </div>
+        <div className="projection-card highlight">
+          <div className="label">Median target</div>
+          <div className="value">{comp.median_target ? fmtUsd(comp.median_target) : '\u2014'}</div>
+          <div className="sub">
+            {comp.price_targets.length > 0 &&
+              `${fmtUsd(comp.price_targets[0])} \u2013 ${fmtUsd(comp.price_targets[comp.price_targets.length - 1])}`}
+          </div>
+        </div>
+        <div className="projection-card highlight">
+          <div className="label">Окно пика</div>
+          <div className="value">{fmtDate(comp.peak_window[0])}</div>
+          <div className="sub">до {fmtDate(comp.peak_window[1])}</div>
+        </div>
+        <div className="projection-card highlight">
+          <div className="label">Top-to-top check</div>
+          <div className="value">{fmtDate(comp.top_to_top_check)}</div>
+          <div className="sub">Avg {ht.top_to_top_avg_days}д между топами</div>
+        </div>
+      </div>
+
+      {/* Model details grid */}
+      <div className="signal-section-title" style={{ marginTop: '1.2rem' }}>Модели</div>
+      <div className="signal-grid">
+        {/* Power Law */}
+        <div className={`signal-card ${plPositionTone(pl.position)}`}>
+          <div className="signal-label">POWER LAW</div>
+          <div className="signal-value">{fmtUsd(pl.fair_value)}</div>
+          <div className="signal-note">
+            Fair value (R²={pl.r_squared.toFixed(2)}).
+            Текущая позиция: {(pl.position * 100).toFixed(0)}% — {plPositionLabel(pl.position)}.
+            Коридор ±1σ: {fmtUsd(pl.band_1sigma[0])} – {fmtUsd(pl.band_1sigma[1])}.
+            На дату пика: fair {fmtUsd(pl.fair_at_projected_peak)}, потолок {fmtUsd(pl.band_at_projected_peak[1])}.
+          </div>
+        </div>
+
+        {/* Golden Ratio */}
+        <div className="signal-card neutral">
+          <div className="signal-label">GOLDEN RATIO MULTIPLIER</div>
+          <div className="signal-value">{fmtUsd(gr.current_ceiling.projected_ceiling)}</div>
+          <div className="signal-note">
+            350DMA = {fmtUsd(gr.sma350)}.
+            Текущий ceiling: ×{gr.current_ceiling.fib_level} = {fmtUsd(gr.current_ceiling.projected_ceiling)}.
+            Следующий цикл: ×{gr.current_ceiling.next_cycle_fib} = {fmtUsd(gr.current_ceiling.next_cycle_ceiling)}.
+          </div>
+        </div>
+
+        {/* Halving Timing */}
+        <div className="signal-card neutral">
+          <div className="signal-label">HALVING TIMING</div>
+          <div className="signal-value">{fmtDate(ht.projected_peak)}</div>
+          <div className="signal-note">
+            Последний халвинг: {fmtDate(ht.last_halving)}.
+            Среднее от халвинга до пика: {ht.halving_model?.avg_days ?? '\u2014'}д (последние 3 цикла).
+            Окно: {fmtDate(ht.peak_window_early)} – {fmtDate(ht.peak_window_late)}.
+            Следующий халвинг ~{fmtDate(ht.next_halving_est)}.
+          </div>
+        </div>
+
+        {/* Diminishing Returns */}
+        <div className="signal-card neutral">
+          <div className="signal-label">DIMINISHING RETURNS</div>
+          <div className="signal-value">{fmtUsd(dr.projected_peak_from_bottom)}</div>
+          <div className="signal-note">
+            Decay factor: ×{dr.avg_decay} между циклами.
+            Прогноз ROI: {dr.projected_next_roi_x}× (конс. {dr.projected_next_roi_conservative_x}×).
+            Пик: {fmtUsd(dr.projected_peak_conservative)} – {fmtUsd(dr.projected_peak_from_bottom)}.
+            Медвежья просадка: ~{dr.projected_next_drawdown_pct}% → дно ~{fmtUsd(dr.projected_next_bottom)}.
+          </div>
+        </div>
+
+        {/* Mayer Multiple */}
+        <div className={`signal-card ${
+          proj.mayer_multiple != null && proj.mayer_multiple > 2.4 ? 'bear' :
+          proj.mayer_multiple != null && proj.mayer_multiple < 0.8 ? 'bull' : 'neutral'
+        }`}>
+          <div className="signal-label">MAYER MULTIPLE</div>
+          <div className="signal-value">{proj.mayer_multiple != null ? proj.mayer_multiple.toFixed(2) : '\u2014'}</div>
+          <div className="signal-note">
+            Price / 200DMA ({fmtUsd(proj.sma200)}).
+            Исторически: top &gt; 2.4, bottom &lt; 0.5.
+          </div>
+        </div>
+
+        {/* Pi Cycle Distance */}
+        <div className={`signal-card ${
+          proj.pi_cycle_distance != null && proj.pi_cycle_distance > -0.02 ? 'bear' : 'neutral'
+        }`}>
+          <div className="signal-label">PI CYCLE DISTANCE</div>
+          <div className="signal-value">{proj.pi_cycle_distance != null ? (proj.pi_cycle_distance * 100).toFixed(1) + '%' : '\u2014'}</div>
+          <div className="signal-note">
+            Расстояние 111DMA до 2×350DMA.
+            0% = пересечение (top signal). Сейчас {proj.pi_cycle_distance != null && proj.pi_cycle_distance < 0 ? 'ниже' : 'выше'}.
+          </div>
+        </div>
+      </div>
+
+      {/* ROI History Table */}
+      {dr.cycle_rois.length > 0 && (
+        <>
+          <div className="signal-section-title" style={{ marginTop: '1.2rem' }}>ROI по циклам</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Цикл</th>
+                <th>Дно</th>
+                <th>Пик</th>
+                <th>ROI</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dr.cycle_rois.map(r => (
+                <tr key={r.cycle}>
+                  <td>{r.cycle}</td>
+                  <td>{fmtUsd(r.bottom)}</td>
+                  <td>{fmtUsd(r.top)}</td>
+                  <td className="lift-good">{r.roi_x}×</td>
+                </tr>
+              ))}
+              <tr style={{ opacity: 0.7, fontStyle: 'italic' }}>
+                <td>Next</td>
+                <td>{fmtUsd(dr.projected_next_bottom)}</td>
+                <td>{fmtUsd(dr.projected_peak_conservative)} – {fmtUsd(dr.projected_peak_from_bottom)}</td>
+                <td>{dr.projected_next_roi_conservative_x}× – {dr.projected_next_roi_x}×</td>
+              </tr>
+            </tbody>
+          </table>
+        </>
+      )}
+    </>
+  );
 }
 
 export default function CycleSection({ data, error }: Props) {
@@ -125,6 +295,8 @@ export default function CycleSection({ data, error }: Props) {
         </div>
 
         {data.history?.length > 0 && <CycleChart history={data.history} />}
+
+        {data.projections && <ProjectionBlock proj={data.projections} />}
 
         {flagged.length > 0 && (
           <>

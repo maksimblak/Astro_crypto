@@ -5,9 +5,15 @@ from __future__ import annotations
 from datetime import date, datetime
 
 import duckdb
+import pandas as pd
 from fastapi import APIRouter, HTTPException
 
 from backend.db import get_db, is_missing_relation
+
+try:
+    from research.cycle_projections import build_projections
+except ImportError:
+    build_projections = None  # type: ignore[assignment]
 
 router = APIRouter(tags=["cycle"])
 
@@ -264,4 +270,25 @@ def api_cycle():
         },
         "signals": signals,
         "history": history,
+        "projections": _build_projections_safe(),
     }
+
+
+def _build_projections_safe() -> dict | None:
+    """Build price-only projections from btc_daily OHLCV. Returns None on failure."""
+    if build_projections is None:
+        return None
+    try:
+        with get_db() as conn:
+            raw = conn.execute(
+                "SELECT date, close FROM btc_daily ORDER BY date"
+            ).fetchall()
+        if not raw:
+            return None
+        df = pd.DataFrame(raw)
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.set_index("date")
+        df["close"] = pd.to_numeric(df["close"], errors="coerce")
+        return build_projections(df)
+    except Exception:
+        return None

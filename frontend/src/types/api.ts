@@ -188,6 +188,62 @@ export interface CycleHistory {
   hashribbon_buy_signal?: number | null;
 }
 
+export interface CycleProjections {
+  reference_date: string;
+  current_price: number;
+  power_law: {
+    fair_value: number;
+    band_1sigma: [number, number];
+    band_2sigma: [number, number];
+    position: number;
+    r_squared: number;
+    fair_at_projected_peak: number;
+    band_at_projected_peak: [number, number];
+  };
+  golden_ratio: {
+    sma350: number;
+    levels: { fib: number; price: number }[];
+    current_ceiling: {
+      fib_level: number;
+      projected_ceiling: number;
+      next_cycle_fib: number;
+      next_cycle_ceiling: number;
+    };
+  };
+  halving_timing: {
+    last_halving: string;
+    projected_peak: string;
+    peak_window_early: string;
+    peak_window_late: string;
+    days_to_projected_peak: number;
+    top_to_top_avg_days: number;
+    top_to_top_projection: string;
+    next_halving_est: string;
+  };
+  diminishing_returns: {
+    cycle_rois: { cycle: number; bottom: number; top: number; roi_x: number }[];
+    avg_decay: number;
+    projected_next_roi_x: number;
+    projected_next_roi_conservative_x: number;
+    projected_peak_from_bottom: number;
+    projected_peak_conservative: number;
+    bear_drawdowns: number[];
+    projected_next_drawdown_pct: number;
+    projected_next_bottom: number;
+  };
+  mayer_multiple: number | null;
+  pi_cycle_distance: number | null;
+  sma200: number;
+  composite: {
+    projected_peak_date: string;
+    days_to_peak: number;
+    peak_window: [string, string];
+    price_targets: number[];
+    median_target: number | null;
+    top_to_top_check: string;
+  };
+}
+
 export interface CycleData {
   as_of: string;
   price?: number | null;
@@ -201,6 +257,7 @@ export interface CycleData {
   metrics: CycleMetrics;
   signals: Signal[];
   history: CycleHistory[];
+  projections?: CycleProjections | null;
   error?: string;
 }
 

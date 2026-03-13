@@ -443,9 +443,10 @@ def _compute_cycle_scores(frame: pd.DataFrame) -> pd.DataFrame:
     )
     hashribbon_trend_up = frame["hashrate_sma_30"] > frame["hashrate_sma_60"]
     hashribbon_setup = hashribbon_trend_up & price_confirm
+    previous_hashribbon_setup = hashribbon_setup.shift(1).fillna(False).astype(bool)
     frame["hashribbon_buy_signal"] = (
         hashribbon_setup
-        & ~hashribbon_setup.shift(1).fillna(False)
+        & previous_hashribbon_setup.eq(False)
     ).astype("int64")
     frame["hashribbon_sell_signal"] = (
         (frame["hashrate_sma_30"] < frame["hashrate_sma_60"])
