@@ -8,49 +8,137 @@ interface Props {
   data: RegimeData;
 }
 
+/* ═══ Helpers ═══ */
+
+const DASH = '\u2014';
+
+function fmt(v: number | null | undefined, suffix = ''): string {
+  if (v == null) return DASH;
+  return `${v}${suffix}`;
+}
+
+/** Color class for z-score type values: extreme → colored, mild → neutral */
+function zTone(v: number | null | undefined, invert = false): string {
+  if (v == null) return '';
+  const abs = Math.abs(v);
+  if (abs < 1.5) return '';
+  const positive = invert ? v < 0 : v > 0;
+  return positive ? 'val-bull' : 'val-bear';
+}
+
+/** Color class for percentage change values */
+function pctTone(v: number | null | undefined, invert = false): string {
+  if (v == null) return '';
+  const abs = Math.abs(v);
+  if (abs < 5) return '';
+  const positive = invert ? v < 0 : v > 0;
+  return positive ? 'val-bull' : 'val-bear';
+}
+
+const OI_STATE_LABELS: Record<string, string> = {
+  long_build: 'Long build',
+  short_build: 'Short build',
+  short_cover: 'Short cover',
+  long_unwind: 'Long unwind',
+  unchanged: 'Unchanged',
+};
+
+const OI_STATE_TONES: Record<string, string> = {
+  long_build: 'val-bull',
+  short_cover: 'val-bull',
+  short_build: 'val-bear',
+  long_unwind: 'val-bear',
+};
+
+/* ═══ SVG Score Arc (semicircle gauge) ═══ */
+
+function ScoreArc({ value, min, max, label, tone }: {
+  value: number; min: number; max: number; label: string; tone: 'bull' | 'bear' | 'neutral';
+}) {
+  const R = 54, CX = 60, CY = 60;
+  const half = Math.PI * R; // semicircle length
+  const ratio = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  const filled = half * ratio;
+  const colors = { bull: 'var(--bull)', bear: 'var(--bear)', neutral: 'var(--neon-cyan)' };
+  const glows = { bull: 'var(--glow-green)', bear: 'var(--glow-red)', neutral: 'var(--glow-cyan)' };
+
+  return (
+    <div className="rg-arc-card">
+      <svg viewBox="0 0 120 68" className="rg-arc-svg">
+        <path
+          d={`M ${CX - R} ${CY} A ${R} ${R} 0 0 1 ${CX + R} ${CY}`}
+          fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="7" strokeLinecap="round"
+        />
+        <path
+          d={`M ${CX - R} ${CY} A ${R} ${R} 0 0 1 ${CX + R} ${CY}`}
+          fill="none" stroke={colors[tone]} strokeWidth="7" strokeLinecap="round"
+          strokeDasharray={`${filled} ${half}`}
+          style={{ filter: `drop-shadow(${glows[tone]})`, transition: 'stroke-dasharray 0.8s ease' }}
+        />
+      </svg>
+      <div className="rg-arc-value" style={{ color: colors[tone] }}>
+        {value > 0 ? '+' : ''}{value}
+      </div>
+      <div className="rg-arc-label">{label}</div>
+    </div>
+  );
+}
+
+/* ═══ Z-score bar — shows position from -3σ to +3σ ═══ */
+
+function ZBar({ value, label, invert = false }: {
+  value: number | null | undefined; label?: string; invert?: boolean;
+}) {
+  if (value == null) return null;
+  const clamped = Math.max(-3, Math.min(3, value));
+  const pct = ((clamped + 3) / 6) * 100;
+  const abs = Math.abs(value);
+  let color = 'var(--text3)';
+  if (abs >= 2) color = (invert ? value < 0 : value > 0) ? 'var(--bull)' : 'var(--bear)';
+  else if (abs >= 1.5) color = (invert ? value < 0 : value > 0) ? 'rgba(0,255,136,0.5)' : 'rgba(255,59,92,0.5)';
+
+  return (
+    <div className="rg-zbar">
+      {label && <span className="rg-zbar-label">{label}</span>}
+      <div className="rg-zbar-track">
+        <div className="rg-zbar-center" />
+        <div className="rg-zbar-dot" style={{ left: `${pct}%`, background: color, boxShadow: abs >= 2 ? `0 0 8px ${color}` : 'none' }} />
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Metric card with optional z-bar ═══ */
+
+function MetricCard({ label, value, sub, tone, zValue, zInvert }: {
+  label: string; value: string; sub: string; tone?: string;
+  zValue?: number | null; zInvert?: boolean;
+}) {
+  return (
+    <div className="rg-metric">
+      <div className="rg-metric-label">{label}</div>
+      <div className={`rg-metric-value ${tone || ''}`}>{value}</div>
+      {zValue != null && <ZBar value={zValue} invert={zInvert} />}
+      <div className="rg-metric-sub">{sub}</div>
+    </div>
+  );
+}
+
+/* ═══ Main Component ═══ */
+
 export default function RegimeSection({ data }: Props) {
   const tone = regimeTone(data.regime_code);
   const stressChipTone = stressTone(data.stress_tone);
   const contextChipTone = stressTone(data.context_tone);
-  const setupTone = stressTone(data.setup_tone);
-  const oiStateLabel = data.metrics?.oi_price_state_1d === 'long_build' ? 'Long build'
-    : data.metrics?.oi_price_state_1d === 'short_build' ? 'Short build'
-    : data.metrics?.oi_price_state_1d === 'short_cover' ? 'Short cover'
-    : data.metrics?.oi_price_state_1d === 'long_unwind' ? 'Long unwind'
-    : data.metrics?.oi_price_state_1d === 'unchanged' ? 'Unchanged'
-    : '\u2014';
-  const biasLabel = data.bias === 'risk-on' ? 'Risk-on'
-    : data.bias === 'risk-off' ? 'Risk-off'
-    : 'Нейтрально';
+  const setupTone_ = stressTone(data.setup_tone);
+  const m = data.metrics || {} as Record<string, any>;
 
-  const m = data.metrics || {};
-  const metrics = [
-    { label: 'BTC', value: fmtUsd(data.price), sub: `на ${fmtDate(data.as_of)}` },
-    { label: 'Confidence', value: `${data.confidence}%`, sub: 'Сколько условий режима сейчас совпало' },
-    { label: 'Direction score', value: `${data.direction_score > 0 ? '+' : ''}${data.direction_score}`, sub: 'Чистый directional score без stress-компоненты' },
-    { label: 'Stress score', value: `${data.stress_score}`, sub: 'Отдельный слой турбулентности рынка' },
-    { label: 'Context score', value: `${data.context_score > 0 ? '+' : ''}${data.context_score}`, sub: 'Attention, derivatives и on-chain как отдельный overlay' },
-    { label: 'Momentum 90д', value: `${m.momentum_90 ?? '\u2014'}%`, sub: 'Среднесрочный импульс' },
-    { label: 'Цена vs 200DMA', value: `${m.close_vs_200 ?? '\u2014'}%`, sub: 'Главный structural filter режима' },
-    { label: 'Amihud z', value: `${m.amihud_z_90d ?? '\u2014'}`, sub: 'Liquidity stress vs trailing 90д baseline' },
-    { label: 'Range state', value: `${m.range_compression_20d ?? '\u2014'}x`, sub: 'Текущий диапазон vs median 20д' },
-    { label: 'Просадка от ATH', value: `${m.drawdown_ath ?? '\u2014'}%`, sub: 'Насколько далеко рынок от пика' },
-    { label: 'Wikipedia z', value: `${m.wiki_views_z_30d ?? '\u2014'}`, sub: 'Внешнее внимание к BTC vs 30д baseline' },
-    { label: 'Fear & Greed', value: `${m.fear_greed_value ?? '\u2014'}`, sub: 'Сантимент толпы по шкале 0-100' },
-    { label: 'Funding z', value: `${m.funding_rate_z_30d ?? '\u2014'}`, sub: 'Watchlist only: в context score пока не входит' },
-    { label: 'Funding divergence 3д', value: `${m.funding_price_divergence_3d ?? '\u2014'}`, sub: 'Положительное = price и funding расходятся' },
-    { label: 'Perp premium', value: `${m.perp_premium_daily ?? '\u2014'}%`, sub: 'Премия perpetual к spot/index' },
-    { label: 'OI delta 1д', value: `${m.open_interest_delta_1d ?? '\u2014'}%`, sub: 'Дневное изменение открытого интереса' },
-    { label: 'OI delta z', value: `${m.open_interest_delta_z_30d ?? '\u2014'}`, sub: 'Насколько необычно текущее изменение OI' },
-    { label: 'OI state', value: oiStateLabel, sub: 'Long build / short build / unwind / cover' },
-    { label: 'OI z', value: `${m.open_interest_z_30d ?? '\u2014'}`, sub: 'Насколько раздут открытый интерес' },
-    { label: 'DXY 20д', value: `${m.dxy_return_20d ?? '\u2014'}%`, sub: 'Сильный рост доллара = macro headwind' },
-    { label: 'DXY z', value: `${m.dxy_return_z_90d ?? '\u2014'}`, sub: 'Насколько необычен импульс доллара' },
-    { label: 'US10Y 20д', value: `${m.us10y_change_20d_bps ?? '\u2014'} bps`, sub: 'Изменение доходности 10-леток за 20 дней' },
-    { label: 'US10Y z', value: `${m.us10y_change_z_90d ?? '\u2014'}`, sub: 'Насколько необычен rates shock' },
-    { label: 'BTC/SPX corr', value: `${m.btc_spx_corr_30d ?? '\u2014'}`, sub: 'Высокая корреляция = macro доминирует' },
-    { label: 'Active addr z', value: `${m.unique_addresses_z_30d ?? '\u2014'}`, sub: 'Сильнейший on-chain сигнал по backtest' },
-  ];
+  const biasLabel = data.bias === 'risk-on' ? 'Risk-on'
+    : data.bias === 'risk-off' ? 'Risk-off' : 'Нейтрально';
+
+  const oiState = m.oi_price_state_1d as string | undefined;
+  const oiLabel = oiState ? (OI_STATE_LABELS[oiState] ?? DASH) : DASH;
+  const oiTone = oiState ? (OI_STATE_TONES[oiState] ?? '') : '';
 
   if (data.error) {
     return (
@@ -77,59 +165,166 @@ export default function RegimeSection({ data }: Props) {
         </div>
       </div>
       <div className="card">
-        {/* Setup banner */}
-        <div className="setup-banner">
-          <div className={`setup-score ${setupTone}`}>
-            {data.setup_score > 0 ? '+' : ''}{data.setup_score}
-          </div>
-          <div className="setup-copy">
-            <div className="setup-kicker">Сводный индикаторный score на день</div>
-            <div className="setup-label">{data.setup_label}</div>
-            <div className="setup-text">
-              {data.setup_summary} Это не прогноз цены в процентах, а быстрая сводка того, насколько хорошо текущие индикаторы складываются в дневной setup.
-            </div>
-          </div>
-        </div>
 
-        {/* Regime overview */}
-        <div className="regime-overview">
-          <div className="regime-main">
-            <div className="regime-kicker">Режим на {fmtDate(data.as_of)}</div>
-            <div className="regime-title">{data.regime_label}</div>
-            <div className="regime-copy">{data.summary}</div>
-            <div className="regime-chips">
-              <span className={`regime-chip ${tone}`}>{biasLabel}</span>
-              <span className={`regime-chip ${stressChipTone}`}>{data.stress_label}</span>
-              <span className={`regime-chip ${contextChipTone}`}>{data.context_label}</span>
-              <span className={`regime-chip ${tone}`}>{data.confidence}% confidence</span>
-            </div>
-          </div>
-          <div className="regime-metrics">
-            {metrics.map(met => (
-              <div key={met.label} className="regime-metric">
-                <div className="label">{met.label}</div>
-                <div className="value">{met.value}</div>
-                <div className="sub">{met.sub}</div>
+        {/* ── Hero: Setup + Regime + Arcs ── */}
+        <div className="rg-hero">
+          {/* Setup banner */}
+          <div className={`rg-setup ${setupTone_}`}>
+            <div className="rg-setup-score-wrap">
+              <div className={`rg-setup-score ${setupTone_}`}>
+                {data.setup_score > 0 ? '+' : ''}{data.setup_score}
               </div>
-            ))}
+              <div className="rg-setup-kicker">Daily setup</div>
+            </div>
+            <div className="rg-setup-info">
+              <div className="rg-setup-label">{data.setup_label}</div>
+              <div className="rg-setup-text">{data.setup_summary}</div>
+            </div>
+          </div>
+
+          {/* Regime card + Score arcs */}
+          <div className="rg-hero-bottom">
+            <div className={`rg-regime-card ${tone}`}>
+              <div className="rg-regime-kicker">Режим на {fmtDate(data.as_of)}</div>
+              <div className="rg-regime-title">{data.regime_label}</div>
+              <div className="rg-regime-summary">{data.summary}</div>
+              <div className="rg-chips">
+                <span className={`rg-chip ${tone}`}>{biasLabel}</span>
+                <span className={`rg-chip ${stressChipTone}`}>{data.stress_label}</span>
+                <span className={`rg-chip ${contextChipTone}`}>{data.context_label}</span>
+                <span className={`rg-chip ${tone}`}>{data.confidence}% confidence</span>
+              </div>
+            </div>
+
+            <div className="rg-arcs">
+              <ScoreArc value={data.direction_score} min={-18} max={18} label="Direction" tone={data.direction_score >= 0 ? 'bull' : 'bear'} />
+              <ScoreArc value={data.stress_score} min={0} max={12} label="Stress" tone={data.stress_score >= 6 ? 'bear' : data.stress_score >= 3 ? 'neutral' : 'bull'} />
+              <ScoreArc value={data.context_score} min={-8} max={8} label="Context" tone={data.context_score >= 2 ? 'bull' : data.context_score <= -2 ? 'bear' : 'neutral'} />
+            </div>
+
+            {/* BTC price card */}
+            <div className="rg-price-card">
+              <div className="rg-price-kicker">BTC</div>
+              <div className="rg-price-value">{fmtUsd(data.price)}</div>
+              <div className="rg-price-date">на {fmtDate(data.as_of)}</div>
+              <div className="rg-price-stats">
+                <div className="rg-price-stat">
+                  <span className="rg-price-stat-label">Momentum 90д</span>
+                  <span className={`rg-price-stat-value ${pctTone(m.momentum_90)}`}>{fmt(m.momentum_90, '%')}</span>
+                </div>
+                <div className="rg-price-stat">
+                  <span className="rg-price-stat-label">vs 200DMA</span>
+                  <span className={`rg-price-stat-value ${pctTone(m.close_vs_200)}`}>{fmt(m.close_vs_200, '%')}</span>
+                </div>
+                <div className="rg-price-stat">
+                  <span className="rg-price-stat-label">От ATH</span>
+                  <span className={`rg-price-stat-value ${pctTone(m.drawdown_ath)}`}>{fmt(m.drawdown_ath, '%')}</span>
+                </div>
+                <div className="rg-price-stat">
+                  <span className="rg-price-stat-label">Confidence</span>
+                  <span className="rg-price-stat-value">{data.confidence}%</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Signals */}
-        <div className="signal-section-title">Direction signals</div>
-        <div className="signal-grid">
-          {(data.direction_signals || []).map((s, i) => <SignalCard key={i} signal={s} />)}
-        </div>
-        <div className="signal-section-title">Stress signals</div>
-        <div className="signal-grid">
-          {(data.stress_signals || []).map((s, i) => <SignalCard key={i} signal={s} />)}
-        </div>
-        <div className="signal-section-title">External context</div>
-        <div className="signal-grid">
-          {(data.context_signals || []).map((s, i) => <SignalCard key={i} signal={s} />)}
+        {/* ── Metric Groups ── */}
+        <div className="rg-groups">
+
+          {/* Volatility & Liquidity */}
+          <div className="rg-group">
+            <div className="rg-group-title">Volatility & Liquidity</div>
+            <div className="rg-group-grid rg-group-grid-3">
+              <MetricCard label="Amihud Z" value={fmt(m.amihud_z_90d)} sub="Liquidity stress vs 90д baseline" tone={zTone(m.amihud_z_90d, true)} zValue={m.amihud_z_90d} zInvert />
+              <MetricCard label="Range State" value={fmt(m.range_compression_20d, 'x')} sub="Текущий диапазон vs median 20д" />
+              <MetricCard label="Fear & Greed" value={fmt(m.fear_greed_value)} sub="Сантимент толпы 0-100" tone={m.fear_greed_value != null ? (m.fear_greed_value <= 25 ? 'val-bear' : m.fear_greed_value >= 75 ? 'val-bull' : '') : ''} />
+            </div>
+          </div>
+
+          {/* Sentiment & Attention */}
+          <div className="rg-group">
+            <div className="rg-group-title">Sentiment & Attention</div>
+            <div className="rg-group-grid rg-group-grid-2">
+              <MetricCard label="Wikipedia Z" value={fmt(m.wiki_views_z_30d)} sub="Внешнее внимание к BTC vs 30д" tone={zTone(m.wiki_views_z_30d, true)} zValue={m.wiki_views_z_30d} zInvert />
+              <MetricCard label="Active Addr Z" value={fmt(m.unique_addresses_z_30d)} sub="Сильнейший on-chain сигнал" tone={zTone(m.unique_addresses_z_30d)} zValue={m.unique_addresses_z_30d} />
+            </div>
+          </div>
+
+          {/* Derivatives */}
+          <div className="rg-group">
+            <div className="rg-group-title">Derivatives</div>
+            <div className="rg-group-grid rg-group-grid-4">
+              <MetricCard label="Funding Z" value={fmt(m.funding_rate_z_30d)} sub="Watchlist: не в context score" tone={zTone(m.funding_rate_z_30d)} zValue={m.funding_rate_z_30d} />
+              <MetricCard label="Funding Divergence" value={fmt(m.funding_price_divergence_3d)} sub="+ = price и funding расходятся" tone={zTone(m.funding_price_divergence_3d, true)} />
+              <MetricCard label="Perp Premium" value={fmt(m.perp_premium_daily, '%')} sub="Премия perpetual к spot" tone={pctTone(m.perp_premium_daily)} />
+              <MetricCard label="OI State" value={oiLabel} sub="Build / unwind / cover" tone={oiTone} />
+              <MetricCard label="OI Delta 1д" value={fmt(m.open_interest_delta_1d, '%')} sub="Дневное изменение OI" />
+              <MetricCard label="OI Delta Z" value={fmt(m.open_interest_delta_z_30d)} sub="Необычность изменения" tone={zTone(m.open_interest_delta_z_30d)} zValue={m.open_interest_delta_z_30d} />
+              <MetricCard label="OI Z" value={fmt(m.open_interest_z_30d)} sub="Насколько раздут OI" tone={zTone(m.open_interest_z_30d)} zValue={m.open_interest_z_30d} />
+            </div>
+          </div>
+
+          {/* Macro */}
+          <div className="rg-group">
+            <div className="rg-group-title">Macro</div>
+            <div className="rg-group-grid rg-group-grid-3">
+              <div className="rg-metric rg-metric-wide">
+                <div className="rg-metric-label">DXY</div>
+                <div className="rg-metric-row">
+                  <div>
+                    <div className={`rg-metric-value ${pctTone(m.dxy_return_20d, true)}`}>{fmt(m.dxy_return_20d, '%')}</div>
+                    <div className="rg-metric-sub">20д change</div>
+                  </div>
+                  <div>
+                    <div className={`rg-metric-value ${zTone(m.dxy_return_z_90d, true)}`}>{fmt(m.dxy_return_z_90d)}</div>
+                    <div className="rg-metric-sub">Z-score</div>
+                  </div>
+                </div>
+                <ZBar value={m.dxy_return_z_90d} invert />
+              </div>
+              <div className="rg-metric rg-metric-wide">
+                <div className="rg-metric-label">US10Y</div>
+                <div className="rg-metric-row">
+                  <div>
+                    <div className={`rg-metric-value ${(m.us10y_change_20d_bps ?? 0) > 20 ? 'val-bear' : ''}`}>{fmt(m.us10y_change_20d_bps)} <small>bps</small></div>
+                    <div className="rg-metric-sub">20д change</div>
+                  </div>
+                  <div>
+                    <div className={`rg-metric-value ${zTone(m.us10y_change_z_90d, true)}`}>{fmt(m.us10y_change_z_90d)}</div>
+                    <div className="rg-metric-sub">Z-score</div>
+                  </div>
+                </div>
+                <ZBar value={m.us10y_change_z_90d} invert />
+              </div>
+              <MetricCard label="BTC/SPX Corr" value={fmt(m.btc_spx_corr_30d)} sub="Высокая = macro доминирует" tone={(m.btc_spx_corr_30d ?? 0) > 0.6 ? 'val-bear' : ''} />
+            </div>
+          </div>
         </div>
 
-        {/* Chart */}
+        {/* ── Signals ── */}
+        <div className="rg-signals">
+          <div className="rg-signal-section">
+            <div className="rg-signal-title">Direction signals</div>
+            <div className="signal-grid">
+              {(data.direction_signals || []).map((s, i) => <SignalCard key={i} signal={s} />)}
+            </div>
+          </div>
+          <div className="rg-signal-section">
+            <div className="rg-signal-title">Stress signals</div>
+            <div className="signal-grid">
+              {(data.stress_signals || []).map((s, i) => <SignalCard key={i} signal={s} />)}
+            </div>
+          </div>
+          <div className="rg-signal-section">
+            <div className="rg-signal-title">External context</div>
+            <div className="signal-grid">
+              {(data.context_signals || []).map((s, i) => <SignalCard key={i} signal={s} />)}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Chart ── */}
         {data.history?.length > 0 && <RegimeChart history={data.history} />}
       </div>
     </div>
