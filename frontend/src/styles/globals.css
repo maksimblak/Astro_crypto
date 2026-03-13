@@ -396,6 +396,42 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   gap: 12px;
 }
 
+/* Projection cards */
+.projection-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.projection-card {
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+}
+.projection-card.highlight {
+  border-color: var(--border-glow);
+  background: linear-gradient(135deg, rgba(0,212,255,0.05), rgba(139,92,246,0.05));
+}
+.projection-card .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text2);
+  margin-bottom: 4px;
+}
+.projection-card .value {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--neon-cyan);
+}
+.projection-card .sub {
+  font-size: 12px;
+  color: var(--text2);
+  margin-top: 4px;
+}
+
 /* Footer */
 .footer {
   text-align: center; padding: 40px 0 24px;

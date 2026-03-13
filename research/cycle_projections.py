@@ -223,8 +223,8 @@ def project_next_peak(reference_date: date | None = None) -> dict:
 # ── Diminishing Returns Model ─────────────────────────────────────
 
 def diminishing_returns_projection() -> dict:
-    """Project next cycle ROI and price based on diminishing returns pattern."""
-    # Calculate ROI per cycle (bottom to top)
+    """Project current and next cycle based on diminishing returns pattern."""
+    # Calculate ROI per completed cycle (bottom to top)
     cycle_rois = []
     for i, (bottom_price, top_price) in enumerate(
         zip(CYCLE_BOTTOM_PRICES, CYCLE_TOP_PRICES[1:])
@@ -245,29 +245,41 @@ def diminishing_returns_projection() -> dict:
 
     avg_decay = float(np.mean(decay_factors)) if decay_factors else 3.0
 
-    # Project next cycle
-    last_roi = cycle_rois[-1]["roi_x"] if cycle_rois else 4.0
-    projected_roi = last_roi / avg_decay
-    projected_roi_conservative = last_roi / (avg_decay * 1.3)
+    # Current cycle: bottom $15460 (Nov 2022), current top $109114 (Jan 2025)
+    # This is the ONGOING cycle — project its remaining upside
+    current_bottom = CYCLE_BOTTOM_PRICES[-1]  # $15460
+    current_top = CYCLE_TOP_PRICES[-1]  # $109114 (current ATH)
+    current_roi = current_top / current_bottom  # ~7.1×
 
-    last_bottom = CYCLE_BOTTOM_PRICES[-1]
-    # Bear market drawdown also diminishing: 93% → 87% → 84% → 77%
+    # Bear drawdowns diminishing: 93% → 87% → 84% → 77%
     drawdowns = [0.93, 0.87, 0.84, 0.77]
-    avg_drawdown_decay = np.mean([drawdowns[i] / drawdowns[i + 1] for i in range(len(drawdowns) - 1)])
+    avg_drawdown_decay = float(np.mean(
+        [drawdowns[i] / drawdowns[i + 1] for i in range(len(drawdowns) - 1)]
+    ))
     projected_drawdown = drawdowns[-1] / avg_drawdown_decay
-    projected_drawdown = min(projected_drawdown, 0.75)  # cap
+    projected_drawdown = min(projected_drawdown, 0.75)  # cap at 75%
 
-    last_top = CYCLE_TOP_PRICES[-1]
-    projected_next_bottom = last_top * (1 - projected_drawdown)
+    # Project next cycle (after 2028 halving)
+    projected_next_bottom = current_top * (1 - projected_drawdown)
+    last_roi = cycle_rois[-1]["roi_x"] if cycle_rois else 4.0
+    next_cycle_roi = last_roi / avg_decay
+    next_cycle_roi_conservative = last_roi / (avg_decay * 1.3)
+    projected_next_peak = projected_next_bottom * next_cycle_roi
+    projected_next_peak_conservative = projected_next_bottom * next_cycle_roi_conservative
 
     return {
         "cycle_rois": cycle_rois,
         "decay_factors": decay_factors,
         "avg_decay": round(avg_decay, 2),
-        "projected_next_roi_x": round(projected_roi, 1),
-        "projected_next_roi_conservative_x": round(projected_roi_conservative, 1),
-        "projected_peak_from_bottom": round(last_bottom * projected_roi, 0),
-        "projected_peak_conservative": round(last_bottom * projected_roi_conservative, 0),
+        # Current cycle stats
+        "current_cycle_bottom": current_bottom,
+        "current_cycle_top": current_top,
+        "current_cycle_roi_x": round(current_roi, 1),
+        # Next cycle projections
+        "projected_next_roi_x": round(next_cycle_roi, 1),
+        "projected_next_roi_conservative_x": round(next_cycle_roi_conservative, 1),
+        "projected_peak_from_bottom": round(projected_next_peak, 0),
+        "projected_peak_conservative": round(projected_next_peak_conservative, 0),
         "bear_drawdowns": drawdowns,
         "projected_next_drawdown_pct": round(projected_drawdown * 100, 1),
         "projected_next_bottom": round(projected_next_bottom, 0),
@@ -346,6 +358,7 @@ def build_projections(
     pl_band_at_peak = power_law_band(pl_params, peak_date, 2.0)
 
     # Composite projection summary
+    # For the NEXT cycle (post-2028 halving): use dim returns + golden ratio next + power law at peak
     price_targets = [
         dim_returns["projected_peak_conservative"],
         dim_returns["projected_peak_from_bottom"],
