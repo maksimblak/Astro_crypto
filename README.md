@@ -57,19 +57,27 @@ python3 research/astro_scoring.py
 python3 research/astro_extended_analysis.py
 ```
 
-3. Запустить API:
+3. Если нужен frontend через backend, собрать его:
+
+```bash
+cd frontend
+npm run build
+cd ..
+```
+
+4. Запустить API:
 
 ```bash
 python3 run.py
 ```
 
-4. Открыть backend со встроенным production-build frontend:
+5. Открыть backend со встроенным production-build frontend:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-Для отдельной frontend-разработки:
+Если `frontend/dist` не собран, backend поднимет только API. Для отдельной frontend-разработки:
 
 ```bash
 cd frontend

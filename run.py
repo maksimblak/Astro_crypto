@@ -1,4 +1,4 @@
-"""Запуск API и встроенного frontend build: python run.py"""
+"""Запуск API и встроенного frontend build, если он уже собран: python run.py"""
 
 from research.config import DASHBOARD_HOST, DASHBOARD_PORT
 
