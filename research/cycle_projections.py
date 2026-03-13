@@ -235,32 +235,48 @@ def project_next_peak(reference_date: date | None = None) -> dict:
 
 def diminishing_returns_projection() -> dict:
     """Project current and next cycle based on diminishing returns pattern."""
-    # Calculate ROI per completed cycle (bottom to top)
-    cycle_rois = []
+    # Calculate ROI per CONFIRMED cycle only (bottom to confirmed top)
+    confirmed_rois = []
     for i, (bottom_price, top_price) in enumerate(
-        zip(CYCLE_BOTTOM_PRICES, CYCLE_TOP_PRICES[1:])
+        zip(CYCLE_BOTTOM_PRICES, CYCLE_TOP_PRICES_CONFIRMED[1:])
     ):
         roi = top_price / bottom_price
-        cycle_rois.append({
+        confirmed_rois.append({
             "cycle": i + 2,
             "bottom": bottom_price,
             "top": top_price,
             "roi_x": round(roi, 1),
+            "confirmed": True,
         })
 
-    # Decay factors between cycles
+    # Decay factors between confirmed cycles
     decay_factors = []
-    for i in range(1, len(cycle_rois)):
-        decay = cycle_rois[i - 1]["roi_x"] / cycle_rois[i]["roi_x"]
+    for i in range(1, len(confirmed_rois)):
+        decay = confirmed_rois[i - 1]["roi_x"] / confirmed_rois[i]["roi_x"]
         decay_factors.append(round(decay, 2))
 
-    avg_decay = float(np.mean(decay_factors)) if decay_factors else 3.0
+    avg_decay = float(np.mean(decay_factors)) if decay_factors else 4.5
 
-    # Current cycle: bottom $15460 (Nov 2022), current top $109114 (Jan 2025)
-    # This is the ONGOING cycle — project its remaining upside
+    # Current cycle (ongoing, unconfirmed)
     current_bottom = CYCLE_BOTTOM_PRICES[-1]  # $15460
-    current_top = CYCLE_TOP_PRICES[-1]  # $109114 (current ATH)
-    current_roi = current_top / current_bottom  # ~7.1×
+    current_ath = CURRENT_ATH_PRICE  # $109114 (ATH, not confirmed top)
+    current_roi_actual = current_ath / current_bottom
+
+    # What the decay model projected for current cycle
+    last_confirmed_roi = confirmed_rois[-1]["roi_x"] if confirmed_rois else 22.1
+    projected_current_roi = last_confirmed_roi / avg_decay
+    projected_current_peak = current_bottom * projected_current_roi
+    # Actual already exceeded? Track outperformance
+    current_outperformance = current_roi_actual / projected_current_roi if projected_current_roi > 0 else 1.0
+
+    # Add current cycle as unconfirmed row
+    all_rois = [*confirmed_rois, {
+        "cycle": len(confirmed_rois) + 2,
+        "bottom": current_bottom,
+        "top": current_ath,
+        "roi_x": round(current_roi_actual, 1),
+        "confirmed": False,
+    }]
 
     # Bear drawdowns diminishing: 93% → 87% → 84% → 77%
     drawdowns = [0.93, 0.87, 0.84, 0.77]
@@ -270,23 +286,26 @@ def diminishing_returns_projection() -> dict:
     projected_drawdown = drawdowns[-1] / avg_drawdown_decay
     projected_drawdown = min(projected_drawdown, 0.75)  # cap at 75%
 
-    # Project next cycle (after 2028 halving)
-    projected_next_bottom = current_top * (1 - projected_drawdown)
-    last_roi = cycle_rois[-1]["roi_x"] if cycle_rois else 4.0
-    next_cycle_roi = last_roi / avg_decay
-    next_cycle_roi_conservative = last_roi / (avg_decay * 1.3)
+    # Project next cycle (after 2028 halving) from current ATH
+    projected_next_bottom = current_ath * (1 - projected_drawdown)
+    # Use actual current cycle ROI for next cycle decay (since we already know it)
+    next_cycle_roi = current_roi_actual / avg_decay
+    next_cycle_roi_conservative = current_roi_actual / (avg_decay * 1.5)
     projected_next_peak = projected_next_bottom * next_cycle_roi
     projected_next_peak_conservative = projected_next_bottom * next_cycle_roi_conservative
 
     return {
-        "cycle_rois": cycle_rois,
+        "cycle_rois": all_rois,
         "decay_factors": decay_factors,
         "avg_decay": round(avg_decay, 2),
         # Current cycle stats
         "current_cycle_bottom": current_bottom,
-        "current_cycle_top": current_top,
-        "current_cycle_roi_x": round(current_roi, 1),
-        # Next cycle projections
+        "current_cycle_top": current_ath,
+        "current_cycle_roi_x": round(current_roi_actual, 1),
+        "current_cycle_projected_roi_x": round(projected_current_roi, 1),
+        "current_cycle_projected_peak": round(projected_current_peak, 0),
+        "current_outperformance": round(current_outperformance, 2),
+        # Next cycle projections (post-2028 halving)
         "projected_next_roi_x": round(next_cycle_roi, 1),
         "projected_next_roi_conservative_x": round(next_cycle_roi_conservative, 1),
         "projected_peak_from_bottom": round(projected_next_peak, 0),
@@ -372,22 +391,42 @@ def build_projections(
     # 6. Pi Cycle Distance
     pi_dist = pi_cycle_distance(sma111, sma350x2)
 
-    # Project power law for next peak date
+    # Project power law for peak date and next halving peak
     peak_date_str = timing["projected_peak"]
     peak_date = datetime.strptime(peak_date_str, "%Y-%m-%d").date()
     pl_fair_at_peak = power_law_price(pl_params, peak_date)
     pl_band_at_peak = power_law_band(pl_params, peak_date, 2.0)
 
-    # Composite projection summary
-    # For the NEXT cycle (post-2028 halving): use dim returns + golden ratio next + power law at peak
-    price_targets = [
+    # ── Current cycle targets (THIS cycle, halving 2024) ──
+    current_cycle_targets = [
+        gr_ceiling["projected_ceiling"],          # Golden ratio ×2 ceiling
+        pl_band_at_peak[1],                       # Power law +2σ at projected peak
+        pl_fair_at_peak,                          # Power law fair at projected peak
+    ]
+    current_cycle_targets = sorted([p for p in current_cycle_targets if p and p > 0])
+    current_median = float(np.median(current_cycle_targets)) if current_cycle_targets else None
+
+    # ── Next cycle targets (post-2028 halving) ──
+    next_halving_est_str = timing["next_halving_est"]
+    next_halving_date = datetime.strptime(next_halving_est_str, "%Y-%m-%d").date()
+    next_peak_est = next_halving_date + timedelta(days=timing["halving_model"]["avg_days"])
+    pl_fair_next = power_law_price(pl_params, next_peak_est)
+    pl_band_next = power_law_band(pl_params, next_peak_est, 2.0)
+
+    next_cycle_targets = [
         dim_returns["projected_peak_conservative"],
         dim_returns["projected_peak_from_bottom"],
         gr_ceiling["next_cycle_ceiling"],
-        pl_band_at_peak[1],
+        pl_band_next[1],                           # Power law +2σ at next cycle peak
     ]
-    price_targets = [p for p in price_targets if p and p > 0]
-    median_target = float(np.median(price_targets)) if price_targets else None
+    next_cycle_targets = sorted([p for p in next_cycle_targets if p and p > 0])
+    next_median = float(np.median(next_cycle_targets)) if next_cycle_targets else None
+
+    # Peak status assessment
+    days_to_peak = timing["days_to_projected_peak"]
+    peak_window_late_str = timing["peak_window_late"]
+    peak_window_late = datetime.strptime(peak_window_late_str, "%Y-%m-%d").date()
+    peak_passed = reference_date > peak_window_late
 
     return {
         "reference_date": reference_date.isoformat(),
@@ -417,10 +456,16 @@ def build_projections(
         "sma350x2": round(sma350x2, 2),
         "composite": {
             "projected_peak_date": timing["projected_peak"],
-            "days_to_peak": timing["days_to_projected_peak"],
+            "days_to_peak": days_to_peak,
             "peak_window": [timing["peak_window_early"], timing["peak_window_late"]],
-            "price_targets": [round(p, 0) for p in sorted(price_targets)],
-            "median_target": round(median_target, 0) if median_target else None,
+            "peak_passed": peak_passed,
             "top_to_top_check": timing["top_to_top_projection"],
+            # Current cycle (halving 2024)
+            "current_cycle_targets": [round(p, 0) for p in current_cycle_targets],
+            "current_cycle_median": round(current_median, 0) if current_median else None,
+            # Next cycle (halving ~2028)
+            "next_cycle_targets": [round(p, 0) for p in next_cycle_targets],
+            "next_cycle_median": round(next_median, 0) if next_median else None,
+            "next_cycle_peak_est": next_peak_est.isoformat(),
         },
     }

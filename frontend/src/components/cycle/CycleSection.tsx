@@ -57,29 +57,31 @@ function ProjectionBlock({ proj }: { proj: CycleProjections }) {
   const dr = proj.diminishing_returns;
   const comp = proj.composite;
 
+  const peakPassed = comp.peak_passed;
+
   return (
     <>
-      <div className="signal-section-title">Cycle Projections</div>
+      {/* ── Current Cycle (halving 2024) ── */}
+      <div className="signal-section-title">Текущий цикл (халвинг 2024)</div>
 
-      {/* Composite forecast summary */}
       <div className="projection-summary">
-        <div className="projection-card highlight">
+        <div className={`projection-card highlight ${peakPassed ? 'warn' : ''}`}>
           <div className="label">Прогноз пика</div>
           <div className="value">{fmtDate(comp.projected_peak_date)}</div>
           <div className="sub">
-            {comp.days_to_peak > 0
-              ? `Через ${comp.days_to_peak} дней`
-              : comp.days_to_peak === 0
-                ? 'Сегодня'
-                : `${Math.abs(comp.days_to_peak)} дней назад`}
+            {peakPassed
+              ? `Окно пика закрылось ${Math.abs(comp.days_to_peak)}д назад`
+              : comp.days_to_peak > 0
+                ? `Через ${comp.days_to_peak} дней`
+                : `${Math.abs(comp.days_to_peak)}д назад, но окно до ${fmtDate(comp.peak_window[1])}`}
           </div>
         </div>
         <div className="projection-card highlight">
           <div className="label">Median target</div>
-          <div className="value">{comp.median_target ? fmtUsd(comp.median_target) : '\u2014'}</div>
+          <div className="value">{comp.current_cycle_median ? fmtUsd(comp.current_cycle_median) : '\u2014'}</div>
           <div className="sub">
-            {comp.price_targets.length > 0 &&
-              `${fmtUsd(comp.price_targets[0])} \u2013 ${fmtUsd(comp.price_targets[comp.price_targets.length - 1])}`}
+            {comp.current_cycle_targets.length > 0 &&
+              `${fmtUsd(comp.current_cycle_targets[0])} \u2013 ${fmtUsd(comp.current_cycle_targets[comp.current_cycle_targets.length - 1])}`}
           </div>
         </div>
         <div className="projection-card highlight">
@@ -94,8 +96,15 @@ function ProjectionBlock({ proj }: { proj: CycleProjections }) {
         </div>
       </div>
 
+      {peakPassed && (
+        <div className="projection-card warn-banner" style={{ marginTop: '0.5rem', padding: '10px 14px', opacity: 0.85 }}>
+          Модель считает что пик текущего цикла вероятно уже произошёл (ATH ${fmtUsd(dr.current_cycle_top)} от {fmtDate(proj.reference_date)}).
+          Цена ниже ATH на {((1 - proj.current_price / dr.current_cycle_top) * 100).toFixed(0)}%.
+        </div>
+      )}
+
       {/* Model details grid */}
-      <div className="signal-section-title" style={{ marginTop: '1.2rem' }}>Модели</div>
+      <div className="signal-section-title" style={{ marginTop: '1.2rem' }}>Модели текущего цикла</div>
       <div className="signal-grid">
         {/* Power Law */}
         <div className={`signal-card ${plPositionTone(pl.position)}`}>
@@ -103,44 +112,29 @@ function ProjectionBlock({ proj }: { proj: CycleProjections }) {
           <div className="signal-value">{fmtUsd(pl.fair_value)}</div>
           <div className="signal-note">
             Fair value (R²={pl.r_squared.toFixed(2)}).
-            Текущая позиция: {(pl.position * 100).toFixed(0)}% — {plPositionLabel(pl.position)}.
+            Позиция: {(pl.position * 100).toFixed(0)}% — {plPositionLabel(pl.position)}.
             Коридор ±1σ: {fmtUsd(pl.band_1sigma[0])} – {fmtUsd(pl.band_1sigma[1])}.
-            На дату пика: fair {fmtUsd(pl.fair_at_projected_peak)}, потолок {fmtUsd(pl.band_at_projected_peak[1])}.
           </div>
         </div>
 
         {/* Golden Ratio */}
         <div className="signal-card neutral">
-          <div className="signal-label">GOLDEN RATIO MULTIPLIER</div>
+          <div className="signal-label">GOLDEN RATIO ×{gr.current_ceiling.fib_level}</div>
           <div className="signal-value">{fmtUsd(gr.current_ceiling.projected_ceiling)}</div>
           <div className="signal-note">
             350DMA = {fmtUsd(gr.sma350)}.
-            Текущий ceiling: ×{gr.current_ceiling.fib_level} = {fmtUsd(gr.current_ceiling.projected_ceiling)}.
-            Следующий цикл: ×{gr.current_ceiling.next_cycle_fib} = {fmtUsd(gr.current_ceiling.next_cycle_ceiling)}.
+            Ceiling текущего цикла: ×{gr.current_ceiling.fib_level} = {fmtUsd(gr.current_ceiling.projected_ceiling)}.
           </div>
         </div>
 
         {/* Halving Timing */}
-        <div className="signal-card neutral">
+        <div className={`signal-card ${peakPassed ? 'bear' : 'neutral'}`}>
           <div className="signal-label">HALVING TIMING</div>
           <div className="signal-value">{fmtDate(ht.projected_peak)}</div>
           <div className="signal-note">
-            Последний халвинг: {fmtDate(ht.last_halving)}.
-            Среднее от халвинга до пика: {ht.halving_model?.avg_days ?? '\u2014'}д (последние 3 цикла).
+            Халвинг: {fmtDate(ht.last_halving)}.
+            Avg {ht.halving_model?.avg_days ?? '\u2014'}д до пика (3 цикла).
             Окно: {fmtDate(ht.peak_window_early)} – {fmtDate(ht.peak_window_late)}.
-            Следующий халвинг ~{fmtDate(ht.next_halving_est)}.
-          </div>
-        </div>
-
-        {/* Diminishing Returns */}
-        <div className="signal-card neutral">
-          <div className="signal-label">DIMINISHING RETURNS</div>
-          <div className="signal-value">{fmtUsd(dr.projected_peak_from_bottom)}</div>
-          <div className="signal-note">
-            Decay factor: ×{dr.avg_decay} между циклами.
-            Прогноз ROI: {dr.projected_next_roi_x}× (конс. {dr.projected_next_roi_conservative_x}×).
-            Пик: {fmtUsd(dr.projected_peak_conservative)} – {fmtUsd(dr.projected_peak_from_bottom)}.
-            Медвежья просадка: ~{dr.projected_next_drawdown_pct}% → дно ~{fmtUsd(dr.projected_next_bottom)}.
           </div>
         </div>
 
@@ -153,7 +147,7 @@ function ProjectionBlock({ proj }: { proj: CycleProjections }) {
           <div className="signal-value">{proj.mayer_multiple != null ? proj.mayer_multiple.toFixed(2) : '\u2014'}</div>
           <div className="signal-note">
             Price / 200DMA ({fmtUsd(proj.sma200)}).
-            Исторически: top &gt; 2.4, bottom &lt; 0.5.
+            Top &gt; 2.4, bottom &lt; 0.5.
           </div>
         </div>
 
@@ -164,9 +158,51 @@ function ProjectionBlock({ proj }: { proj: CycleProjections }) {
           <div className="signal-label">PI CYCLE DISTANCE</div>
           <div className="signal-value">{proj.pi_cycle_distance != null ? (proj.pi_cycle_distance * 100).toFixed(1) + '%' : '\u2014'}</div>
           <div className="signal-note">
-            Расстояние 111DMA до 2×350DMA.
-            0% = пересечение (top signal). Сейчас {proj.pi_cycle_distance != null && proj.pi_cycle_distance < 0 ? 'ниже' : 'выше'}.
+            111DMA до 2×350DMA. 0% = top crossover.
+            Сейчас {proj.pi_cycle_distance != null && proj.pi_cycle_distance < 0 ? 'ниже' : 'выше'}.
           </div>
+        </div>
+
+        {/* Diminishing Returns — current cycle assessment */}
+        <div className={`signal-card ${dr.current_outperformance >= 1 ? 'bull' : 'bear'}`}>
+          <div className="signal-label">DIMINISHING RETURNS (тек.)</div>
+          <div className="signal-value">{dr.current_cycle_roi_x}×</div>
+          <div className="signal-note">
+            ATH ${fmtUsd(dr.current_cycle_top)} от дна ${fmtUsd(dr.current_cycle_bottom)}.
+            Модель ожидала {dr.current_cycle_projected_roi_x}× = ${fmtUsd(dr.current_cycle_projected_peak)}.
+            {dr.current_outperformance >= 1
+              ? ` Перевыполнение ${dr.current_outperformance}×.`
+              : ` Недобор до модели.`}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Next Cycle (halving ~2028) ── */}
+      <div className="signal-section-title" style={{ marginTop: '1.5rem' }}>Следующий цикл (халвинг ~2028)</div>
+
+      <div className="projection-summary">
+        <div className="projection-card">
+          <div className="label">Ожидаемый пик</div>
+          <div className="value">{fmtDate(comp.next_cycle_peak_est)}</div>
+          <div className="sub">Следующий халвинг ~{fmtDate(ht.next_halving_est)}</div>
+        </div>
+        <div className="projection-card">
+          <div className="label">Median target</div>
+          <div className="value">{comp.next_cycle_median ? fmtUsd(comp.next_cycle_median) : '\u2014'}</div>
+          <div className="sub">
+            {comp.next_cycle_targets.length > 0 &&
+              `${fmtUsd(comp.next_cycle_targets[0])} \u2013 ${fmtUsd(comp.next_cycle_targets[comp.next_cycle_targets.length - 1])}`}
+          </div>
+        </div>
+        <div className="projection-card">
+          <div className="label">Прогноз просадки</div>
+          <div className="value">~{dr.projected_next_drawdown_pct}%</div>
+          <div className="sub">Дно ~{fmtUsd(dr.projected_next_bottom)}</div>
+        </div>
+        <div className="projection-card">
+          <div className="label">Golden Ratio ×{gr.current_ceiling.next_cycle_fib}</div>
+          <div className="value">{fmtUsd(gr.current_ceiling.next_cycle_ceiling)}</div>
+          <div className="sub">350DMA × {gr.current_ceiling.next_cycle_fib}</div>
         </div>
       </div>
 
@@ -181,22 +217,25 @@ function ProjectionBlock({ proj }: { proj: CycleProjections }) {
                 <th>Дно</th>
                 <th>Пик</th>
                 <th>ROI</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {dr.cycle_rois.map(r => (
-                <tr key={r.cycle}>
+                <tr key={r.cycle} style={r.confirmed ? undefined : { opacity: 0.7, fontStyle: 'italic' }}>
                   <td>{r.cycle}</td>
                   <td>{fmtUsd(r.bottom)}</td>
                   <td>{fmtUsd(r.top)}</td>
                   <td className="lift-good">{r.roi_x}×</td>
+                  <td style={{ fontSize: '0.8em', opacity: 0.6 }}>{r.confirmed ? '' : 'ATH (не подтв.)'}</td>
                 </tr>
               ))}
-              <tr style={{ opacity: 0.7, fontStyle: 'italic' }}>
-                <td>Next</td>
+              <tr style={{ opacity: 0.55, fontStyle: 'italic' }}>
+                <td>~2029</td>
                 <td>{fmtUsd(dr.projected_next_bottom)}</td>
                 <td>{fmtUsd(dr.projected_peak_conservative)} – {fmtUsd(dr.projected_peak_from_bottom)}</td>
                 <td>{dr.projected_next_roi_conservative_x}× – {dr.projected_next_roi_x}×</td>
+                <td style={{ fontSize: '0.8em' }}>прогноз</td>
               </tr>
             </tbody>
           </table>

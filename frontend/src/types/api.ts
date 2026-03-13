@@ -229,12 +229,15 @@ export interface CycleProjections {
     next_halving_est: string;
   };
   diminishing_returns: {
-    cycle_rois: { cycle: number; bottom: number; top: number; roi_x: number }[];
+    cycle_rois: { cycle: number; bottom: number; top: number; roi_x: number; confirmed: boolean }[];
     decay_factors: number[];
     avg_decay: number;
     current_cycle_bottom: number;
     current_cycle_top: number;
     current_cycle_roi_x: number;
+    current_cycle_projected_roi_x: number;
+    current_cycle_projected_peak: number;
+    current_outperformance: number;
     projected_next_roi_x: number;
     projected_next_roi_conservative_x: number;
     projected_peak_from_bottom: number;
@@ -252,9 +255,13 @@ export interface CycleProjections {
     projected_peak_date: string;
     days_to_peak: number;
     peak_window: [string, string];
-    price_targets: number[];
-    median_target: number | null;
+    peak_passed: boolean;
     top_to_top_check: string;
+    current_cycle_targets: number[];
+    current_cycle_median: number | null;
+    next_cycle_targets: number[];
+    next_cycle_median: number | null;
+    next_cycle_peak_est: string;
   };
 }
 

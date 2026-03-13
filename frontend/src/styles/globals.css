@@ -413,6 +413,21 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   border-color: var(--border-glow);
   background: linear-gradient(135deg, rgba(0,212,255,0.05), rgba(139,92,246,0.05));
 }
+.projection-card.highlight.warn {
+  border-color: var(--bear);
+  background: linear-gradient(135deg, rgba(255,85,85,0.08), rgba(255,170,85,0.04));
+}
+.projection-card.highlight.warn .value {
+  color: var(--bear);
+}
+.projection-card.warn-banner {
+  background: rgba(255,85,85,0.06);
+  border: 1px solid rgba(255,85,85,0.2);
+  border-radius: var(--radius-sm);
+  color: var(--text2);
+  font-size: 13px;
+  line-height: 1.5;
+}
 .projection-card .label {
   font-size: 11px;
   text-transform: uppercase;
