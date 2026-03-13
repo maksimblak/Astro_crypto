@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -14,14 +15,23 @@ DB_PATH = str(DATA_DIR / "btc_research.duckdb")
 BTC_TICKER = "BTC-USD"
 BTC_START_DATE = "2016-01-01"
 
+
+def today_local_date() -> date:
+    return datetime.now().astimezone().date()
+
+
+def yfinance_exclusive_end(base_date: date | None = None) -> str:
+    current_date = base_date or today_local_date()
+    return (current_date + timedelta(days=1)).isoformat()
+
 # --- API ---
 HTTP_TIMEOUT = int(os.getenv("ASTROBTC_HTTP_TIMEOUT", "30"))
 HTTP_MAX_RETRIES = int(os.getenv("ASTROBTC_HTTP_MAX_RETRIES", "3"))
 HTTP_USER_AGENT = "AstroBTC/1.0 (market feature pipeline)"
 
 # --- Dashboard ---
-DASHBOARD_HOST = os.getenv("ASTROBTC_HOST", "0.0.0.0")
-DASHBOARD_PORT = int(os.getenv("ASTROBTC_PORT", "5000"))
+DASHBOARD_HOST = os.getenv("ASTROBTC_HOST", "127.0.0.1")
+DASHBOARD_PORT = int(os.getenv("ASTROBTC_PORT", "8000"))
 REGIME_CACHE_TTL = int(os.getenv("ASTROBTC_REGIME_CACHE_TTL", "300"))
 
 # --- Auto-update ---

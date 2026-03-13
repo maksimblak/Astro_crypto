@@ -1,14 +1,15 @@
-import type { TodayData } from '../../types/api';
+import type { ScoreScale, TodayData } from '../../types/api';
 import { scoreClass } from '../../utils/scores';
 import { fmtDate } from '../../utils/dates';
 
 interface Props {
   data: TodayData;
+  scoreScale: ScoreScale;
 }
 
-export default function HeroSection({ data }: Props) {
+export default function HeroSection({ data, scoreScale }: Props) {
   const sc = data.score || 0;
-  const cls = scoreClass(sc);
+  const cls = scoreClass(sc, scoreScale);
 
   const dirText = data.direction > 0
     ? '\u25B2 Склонность к пику'

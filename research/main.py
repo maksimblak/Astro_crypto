@@ -13,14 +13,18 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-from astro_shared import yfinance_exclusive_end
-from derivatives_history import save_derivatives_history_to_db
-from log import get_logger
-from market_features import build_market_features, save_market_features_to_db
+try:
+    from .config import BTC_START_DATE, DB_PATH, yfinance_exclusive_end
+    from .derivatives_history import save_derivatives_history_to_db
+    from .log import get_logger
+    from .market_features import build_market_features, save_market_features_to_db
+except ImportError:
+    from config import BTC_START_DATE, DB_PATH, yfinance_exclusive_end
+    from derivatives_history import save_derivatives_history_to_db
+    from log import get_logger
+    from market_features import build_market_features, save_market_features_to_db
 
 logger = get_logger(__name__)
-
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "btc_research.duckdb")
 
 
 def _ensure_primary_key(conn, table: str, pk_cols: list[str]):
@@ -89,7 +93,7 @@ def init_db():
     return conn
 
 
-def download_btc_data(start: str = "2016-01-01", end: str | None = None) -> pd.DataFrame:
+def download_btc_data(start: str = BTC_START_DATE, end: str | None = None) -> pd.DataFrame:
     """Загружает daily OHLCV BTC/USD через yfinance."""
     end = end or yfinance_exclusive_end()
     logger.info(f"Загрузка BTC-USD данных за {start} — {end}...")
@@ -414,7 +418,7 @@ def main():
     conn = init_db()
 
     # 2. Загрузка данных
-    df_ohlcv = download_btc_data("2016-01-01")
+    df_ohlcv = download_btc_data(BTC_START_DATE)
     if df_ohlcv.empty:
         logger.warning("yfinance вернул пустой набор. Использую текущий snapshot из btc_daily.")
         df_ohlcv = load_existing_daily_from_db(conn)

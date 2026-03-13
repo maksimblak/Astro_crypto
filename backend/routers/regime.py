@@ -3,9 +3,10 @@
 import threading
 
 from cachetools import TTLCache
+import duckdb
 from fastapi import APIRouter, HTTPException
 
-from backend.db import get_db
+from backend.db import get_db, is_missing_relation
 
 router = APIRouter(tags=["regime"])
 
@@ -30,7 +31,7 @@ def _market_feature_select_sql(conn) -> str:
             row["name"]
             for row in conn.execute("PRAGMA table_info(btc_market_features)").fetchall()
         }
-    except Exception:
+    except duckdb.Error:
         return ""
 
     parts = []
@@ -48,8 +49,8 @@ def api_regime():
 
     from market_regime import build_regime_payload
 
-    with get_db() as conn:
-        try:
+    try:
+        with get_db() as conn:
             feature_select = _market_feature_select_sql(conn)
             rows = conn.execute(
                 "SELECT d.date, d.open, d.high, d.low, d.close, d.volume"
@@ -58,13 +59,18 @@ def api_regime():
                 " LEFT JOIN btc_market_features f ON f.date = d.date"
                 " ORDER BY d.date"
             ).fetchall()
-        except Exception:
-            try:
+    except duckdb.Error as exc:
+        if is_missing_relation(exc, "btc_daily"):
+            raise HTTPException(404, "Table btc_daily not found. Run research/main.py first.") from exc
+        try:
+            with get_db() as conn:
                 rows = conn.execute(
                     "SELECT date, open, high, low, close, volume FROM btc_daily ORDER BY date"
                 ).fetchall()
-            except Exception:
-                raise HTTPException(404, "Table btc_daily not found. Run research/main.py first.")
+        except duckdb.Error as fallback_exc:
+            if is_missing_relation(fallback_exc, "btc_daily"):
+                raise HTTPException(404, "Table btc_daily not found. Run research/main.py first.") from fallback_exc
+            raise HTTPException(500, "Failed to query market regime inputs.") from fallback_exc
 
     if not rows:
         raise HTTPException(404, "No market data found in btc_daily.")

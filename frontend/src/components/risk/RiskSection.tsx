@@ -1,23 +1,23 @@
 import { useMemo } from 'react';
-import type { CalendarDay } from '../../types/api';
-import { getThresholds, riskClass } from '../../utils/scores';
+import type { CalendarDay, ScoreScale } from '../../types/api';
+import { riskClass } from '../../utils/scores';
 import { fmtDate, parseDateOnly, localDateKey } from '../../utils/dates';
 
 interface Props {
   calendar: CalendarDay[];
   referenceDate?: string;
+  scoreScale: ScoreScale;
 }
 
-export default function RiskSection({ calendar, referenceDate }: Props) {
+export default function RiskSection({ calendar, referenceDate, scoreScale }: Props) {
   const upcoming = useMemo(() => {
     const today = referenceDate || localDateKey();
-    const th = getThresholds();
-    let items = calendar.filter(d => d.date >= today && d.score >= th.hot).slice(0, 24);
+    let items = calendar.filter(d => d.date >= today && d.score >= scoreScale.hot).slice(0, 24);
     if (!items.length) {
-      items = calendar.filter(d => d.date >= today && d.score >= th.warm).slice(0, 24);
+      items = calendar.filter(d => d.date >= today && d.score >= scoreScale.warm).slice(0, 24);
     }
     return { items, today };
-  }, [calendar, referenceDate]);
+  }, [calendar, referenceDate, scoreScale]);
 
   return (
     <div className="section" id="sectionRisk">
@@ -34,7 +34,7 @@ export default function RiskSection({ calendar, referenceDate }: Props) {
           </div>
         ) : (
           upcoming.items.map(d => {
-            const cls = riskClass(d.score);
+            const cls = riskClass(d.score, scoreScale);
             const todayDate = parseDateOnly(upcoming.today);
             const daysAway = Math.round((parseDateOnly(d.date).getTime() - todayDate.getTime()) / 86400000);
             const details = (d.details || '').split(' | ').filter(s => s.startsWith('+'));

@@ -140,7 +140,15 @@ export interface RegimeData {
 }
 
 export interface UpdateStatus {
-  last_run?: string;
-  status?: string;
-  next_run?: string;
+  enabled: boolean;
+  running: boolean;
+  interval_seconds: number;
+  startup_delay_seconds: number;
+  last_started_at?: string | null;
+  last_finished_at?: string | null;
+  last_success_at?: string | null;
+  last_error?: string | null;
+  last_stage?: string | null;
+  log_path: string;
+  status_path: string;
 }

@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from astro_shared import DB_PATH
+try:
+    from .config import DB_PATH
+except ImportError:
+    from config import DB_PATH
 
 
 FEATURES = [

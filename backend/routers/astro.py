@@ -2,10 +2,11 @@
 
 from datetime import date
 
+import duckdb
 import numpy as np
 from fastapi import APIRouter, HTTPException
 
-from backend.db import get_db
+from backend.db import get_db, is_missing_relation
 
 router = APIRouter(tags=["astro"])
 
@@ -54,8 +55,8 @@ _CALENDAR_FIELDS = (
 
 @router.get("/today")
 def api_today():
-    with get_db() as conn:
-        try:
+    try:
+        with get_db() as conn:
             target_date = date.today().isoformat()
             row = conn.execute(
                 f"SELECT {_CALENDAR_FIELDS} FROM btc_astro_calendar WHERE date = ?",
@@ -70,102 +71,110 @@ def api_today():
                 row = conn.execute(
                     f"SELECT {_CALENDAR_FIELDS} FROM btc_astro_calendar ORDER BY date DESC LIMIT 1"
                 ).fetchone()
-        except Exception:
-            raise HTTPException(404, "Calendar not generated yet.")
+    except duckdb.Error as exc:
+        if is_missing_relation(exc, "btc_astro_calendar"):
+            raise HTTPException(404, "Calendar not generated yet.") from exc
+        raise HTTPException(500, "Failed to query astro calendar.") from exc
     return row if row else {}
 
 
 @router.get("/calendar")
 def api_calendar():
-    with get_db() as conn:
-        try:
+    try:
+        with get_db() as conn:
             rows = conn.execute(
                 f"SELECT {_CALENDAR_FIELDS} FROM btc_astro_calendar ORDER BY date"
             ).fetchall()
-        except Exception:
-            raise HTTPException(404, "Table btc_astro_calendar not found. Run astro_scoring.py first.")
+    except duckdb.Error as exc:
+        if is_missing_relation(exc, "btc_astro_calendar"):
+            raise HTTPException(404, "Table btc_astro_calendar not found. Run astro_scoring.py first.") from exc
+        raise HTTPException(500, "Failed to query astro calendar history.") from exc
     return rows
 
 
 @router.get("/stats")
 def api_stats():
-    with get_db() as conn:
-        try:
+    try:
+        with get_db() as conn:
             period = conn.execute(
                 "SELECT MIN(date) as start_date, MAX(date) as end_date, COUNT(*) as total_days "
                 "FROM btc_astro_history WHERE sample_split = 'test'"
             ).fetchone()
-        except Exception:
-            raise HTTPException(404, "Table btc_astro_history not found. Run astro_scoring.py first.")
 
-        base_scores = [
-            row["score"]
-            for row in conn.execute(
-                "SELECT score FROM btc_astro_history WHERE sample_split = 'test' AND is_pivot = 0"
-            ).fetchall()
-        ]
-        pivot_scores = [
-            row["score"]
-            for row in conn.execute(
-                "SELECT h.score FROM btc_pivots p "
-                "JOIN btc_astro_history h ON h.date = p.date "
+            base_scores = [
+                row["score"]
+                for row in conn.execute(
+                    "SELECT score FROM btc_astro_history WHERE sample_split = 'test' AND is_pivot = 0"
+                ).fetchall()
+            ]
+            pivot_scores = [
+                row["score"]
+                for row in conn.execute(
+                    "SELECT h.score FROM btc_pivots p "
+                    "JOIN btc_astro_history h ON h.date = p.date "
+                    "WHERE h.sample_split = 'test'"
+                ).fetchall()
+            ]
+            score_thresholds = _derive_thresholds(base_scores, pivot_scores)
+
+            baseline = conn.execute(
+                "SELECT AVG(score) as avg_score FROM btc_astro_history "
+                "WHERE sample_split = 'test' AND is_pivot = 0"
+            ).fetchone()
+            baseline_avg = round(baseline["avg_score"], 2) if baseline["avg_score"] else 0
+
+            pivot_avg_row = conn.execute(
+                "SELECT AVG(h.score) as avg_score, COUNT(*) as cnt "
+                "FROM btc_pivots p JOIN btc_astro_history h ON h.date = p.date "
                 "WHERE h.sample_split = 'test'"
-            ).fetchall()
-        ]
-        score_thresholds = _derive_thresholds(base_scores, pivot_scores)
+            ).fetchone()
+            pivot_avg = round(pivot_avg_row["avg_score"], 2) if pivot_avg_row["avg_score"] else 0
+            total_pivots = pivot_avg_row["cnt"]
+            total_days = period["total_days"] if period["total_days"] else 0
 
-        baseline = conn.execute(
-            "SELECT AVG(score) as avg_score FROM btc_astro_history "
-            "WHERE sample_split = 'test' AND is_pivot = 0"
-        ).fetchone()
-        baseline_avg = round(baseline["avg_score"], 2) if baseline["avg_score"] else 0
+            thresholds = []
+            for threshold in score_thresholds:
+                days_above = conn.execute(
+                    "SELECT COUNT(*) as c FROM btc_astro_history "
+                    "WHERE sample_split = 'test' AND score >= ?",
+                    (threshold,),
+                ).fetchone()["c"]
+                pivots_above = conn.execute(
+                    "SELECT COUNT(*) as c FROM btc_pivots p "
+                    "JOIN btc_astro_history h ON h.date = p.date "
+                    "WHERE h.sample_split = 'test' AND h.score >= ?",
+                    (threshold,),
+                ).fetchone()["c"]
 
-        pivot_avg_row = conn.execute(
-            "SELECT AVG(h.score) as avg_score, COUNT(*) as cnt "
-            "FROM btc_pivots p JOIN btc_astro_history h ON h.date = p.date "
-            "WHERE h.sample_split = 'test'"
-        ).fetchone()
-        pivot_avg = round(pivot_avg_row["avg_score"], 2) if pivot_avg_row["avg_score"] else 0
-        total_pivots = pivot_avg_row["cnt"]
-        total_days = period["total_days"] if period["total_days"] else 0
+                days_pct = round(days_above / total_days * 100, 1) if total_days else 0
+                expected_rate = days_above / total_days if total_days else 0
+                actual_rate = pivots_above / total_pivots if total_pivots else 0
+                lift = round(actual_rate / expected_rate, 2) if expected_rate > 0 else 0
 
-        thresholds = []
-        for threshold in score_thresholds:
-            days_above = conn.execute(
-                "SELECT COUNT(*) as c FROM btc_astro_history "
-                "WHERE sample_split = 'test' AND score >= ?",
-                (threshold,),
-            ).fetchone()["c"]
-            pivots_above = conn.execute(
-                "SELECT COUNT(*) as c FROM btc_pivots p "
-                "JOIN btc_astro_history h ON h.date = p.date "
-                "WHERE h.sample_split = 'test' AND h.score >= ?",
-                (threshold,),
-            ).fetchone()["c"]
+                thresholds.append({
+                    "threshold": threshold,
+                    "days_count": days_above,
+                    "days_pct": days_pct,
+                    "pivots_in_zone": pivots_above,
+                    "lift": lift,
+                })
 
-            days_pct = round(days_above / total_days * 100, 1) if total_days else 0
-            expected_rate = days_above / total_days if total_days else 0
-            actual_rate = pivots_above / total_pivots if total_pivots else 0
-            lift = round(actual_rate / expected_rate, 2) if expected_rate > 0 else 0
-
-            thresholds.append({
-                "threshold": threshold,
-                "days_count": days_above,
-                "days_pct": days_pct,
-                "pivots_in_zone": pivots_above,
-                "lift": lift,
-            })
-
-        dir_stats = conn.execute(
-            "SELECT COUNT(*) as total, "
-            "SUM(CASE WHEN (h.direction > 0 AND p.type LIKE '%high') "
-            "OR (h.direction < 0 AND p.type LIKE '%low') THEN 1 ELSE 0 END) as correct "
-            "FROM btc_pivots p JOIN btc_astro_history h ON h.date = p.date "
-            "WHERE h.sample_split = 'test' AND h.direction != 0"
-        ).fetchone()
-        dir_total = dir_stats["total"] if dir_stats["total"] else 0
-        dir_correct = dir_stats["correct"] if dir_stats["correct"] else 0
-        dir_accuracy = round(dir_correct / dir_total * 100, 1) if dir_total > 0 else 0
+            dir_stats = conn.execute(
+                "SELECT COUNT(*) as total, "
+                "SUM(CASE WHEN (h.direction > 0 AND p.type LIKE '%high') "
+                "OR (h.direction < 0 AND p.type LIKE '%low') THEN 1 ELSE 0 END) as correct "
+                "FROM btc_pivots p JOIN btc_astro_history h ON h.date = p.date "
+                "WHERE h.sample_split = 'test' AND h.direction != 0"
+            ).fetchone()
+            dir_total = dir_stats["total"] if dir_stats["total"] else 0
+            dir_correct = dir_stats["correct"] if dir_stats["correct"] else 0
+            dir_accuracy = round(dir_correct / dir_total * 100, 1) if dir_total > 0 else 0
+    except duckdb.Error as exc:
+        if is_missing_relation(exc, "btc_astro_history"):
+            raise HTTPException(404, "Table btc_astro_history not found. Run astro_scoring.py first.") from exc
+        if is_missing_relation(exc, "btc_pivots"):
+            raise HTTPException(404, "Table btc_pivots not found. Run research/main.py first.") from exc
+        raise HTTPException(500, "Failed to compute astro statistics.") from exc
 
     return {
         "baseline_avg_score": baseline_avg,

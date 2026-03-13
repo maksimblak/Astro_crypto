@@ -111,8 +111,8 @@ export default function RegimeChart({ history }: Props) {
         ticks: {
           color: '#4b5563',
           maxTicksLimit: 14,
-          callback: function (this: { getLabelForValue(v: number): string }, v: string | number) {
-            const d = this.getLabelForValue(v as number);
+          callback: (v: string | number) => {
+            const d = history[Number(v)]?.date;
             return d ? d.substring(0, 7) : '';
           },
         },

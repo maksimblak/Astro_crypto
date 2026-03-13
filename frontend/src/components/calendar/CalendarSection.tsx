@@ -1,13 +1,14 @@
 import { useState, useMemo } from 'react';
-import type { CalendarDay } from '../../types/api';
+import type { CalendarDay, ScoreScale } from '../../types/api';
 import { monthLabel } from '../../utils/dates';
 import CalendarChart from './CalendarChart';
 
 interface Props {
   data: CalendarDay[];
+  scoreScale: ScoreScale;
 }
 
-export default function CalendarSection({ data }: Props) {
+export default function CalendarSection({ data, scoreScale }: Props) {
   const [filterMonth, setFilterMonth] = useState<string | null>(null);
 
   const months = useMemo(
@@ -43,7 +44,7 @@ export default function CalendarSection({ data }: Props) {
         </div>
       </div>
       <div className="card">
-        <CalendarChart data={filtered} />
+        <CalendarChart data={filtered} scoreScale={scoreScale} />
       </div>
     </div>
   );

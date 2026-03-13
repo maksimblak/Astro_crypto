@@ -9,11 +9,17 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - platform-specific fallback
+    fcntl = None
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 STATUS_PATH = DATA_DIR / "auto_update_status.json"
 LOG_PATH = DATA_DIR / "auto_update.log"
+LOCK_PATH = DATA_DIR / "auto_update.lock"
 DEFAULT_INTERVAL_SECONDS = 12 * 60 * 60
 DEFAULT_STARTUP_DELAY_SECONDS = 30
 PIPELINE_STEPS = [
@@ -103,6 +109,37 @@ def _append_log(title: str, text: str):
             handle.write(text.rstrip() + "\n")
 
 
+def _acquire_process_lock():
+    if fcntl is None:
+        return None
+
+    _ensure_data_dir()
+    handle = LOCK_PATH.open("a+", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+
+    handle.seek(0)
+    handle.truncate()
+    handle.write(
+        json.dumps({"pid": os.getpid(), "locked_at": _now_iso()}, ensure_ascii=False)
+    )
+    handle.flush()
+    return handle
+
+
+def _release_process_lock(handle):
+    if handle is None:
+        return
+    try:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
+
+
 def auto_update_enabled() -> bool:
     return _read_bool_env("ASTROBTC_AUTO_UPDATE", True)
 
@@ -119,18 +156,23 @@ def run_update_pipeline() -> bool:
     if not _RUN_LOCK.acquire(blocking=False):
         return False
 
-    with _STATUS_LOCK:
-        _write_status(
-            {
-                "enabled": auto_update_enabled(),
-                "running": True,
-                "last_started_at": _now_iso(),
-                "last_error": None,
-                "last_stage": "starting",
-            }
-        )
+    process_lock = _acquire_process_lock()
+    if fcntl is not None and process_lock is None:
+        _RUN_LOCK.release()
+        return False
 
     try:
+        with _STATUS_LOCK:
+            _write_status(
+                {
+                    "enabled": auto_update_enabled(),
+                    "running": True,
+                    "last_started_at": _now_iso(),
+                    "last_error": None,
+                    "last_stage": "starting",
+                }
+            )
+
         for stage_name, command in _pipeline_commands():
             with _STATUS_LOCK:
                 _write_status({"last_stage": stage_name})
@@ -185,6 +227,7 @@ def run_update_pipeline() -> bool:
             )
         return True
     finally:
+        _release_process_lock(process_lock)
         _RUN_LOCK.release()
 
 

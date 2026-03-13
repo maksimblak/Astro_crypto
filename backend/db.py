@@ -51,3 +51,11 @@ def get_db_write():
         conn.commit()
     finally:
         conn.close()
+
+
+def is_missing_relation(exc: Exception, *relation_names: str) -> bool:
+    """Best-effort check for missing DuckDB tables/views in query failures."""
+    message = str(exc).lower()
+    if "does not exist" not in message:
+        return False
+    return any(name.lower() in message for name in relation_names)

@@ -5,7 +5,7 @@ import {
   CategoryScale, LinearScale, BarElement,
   Tooltip, Legend,
 } from 'chart.js';
-import type { CalendarDay } from '../../types/api';
+import type { CalendarDay, ScoreScale } from '../../types/api';
 import { fmtShort, fmtDate } from '../../utils/dates';
 import { scoreBarColor, scoreBarBorder } from '../../utils/scores';
 
@@ -13,23 +13,24 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
 interface Props {
   data: CalendarDay[];
+  scoreScale: ScoreScale;
 }
 
-export default function CalendarChart({ data }: Props) {
+export default function CalendarChart({ data, scoreScale }: Props) {
   const chartData = useMemo(() => {
     const scores = data.map(d => d.score);
     return {
       labels: data.map(d => fmtShort(d.date)),
       datasets: [{
         data: scores,
-        backgroundColor: scores.map(s => scoreBarColor(s)),
-        borderColor: scores.map(s => scoreBarBorder(s)),
+        backgroundColor: scores.map(s => scoreBarColor(s, scoreScale)),
+        borderColor: scores.map(s => scoreBarBorder(s, scoreScale)),
         borderWidth: 1,
         borderRadius: 4,
         borderSkipped: false as const,
       }],
     };
-  }, [data]);
+  }, [data, scoreScale]);
 
   const options = useMemo(() => ({
     responsive: true,

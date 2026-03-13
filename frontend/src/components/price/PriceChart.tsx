@@ -108,8 +108,8 @@ export default function PriceChart({ daily, pivots }: Props) {
         ticks: {
           color: '#4b5563',
           maxTicksLimit: 20,
-          callback: function (this: { getLabelForValue(v: number): string }, v: string | number) {
-            const d = this.getLabelForValue(v as number);
+          callback: (v: string | number) => {
+            const d = daily[Number(v)]?.date;
             return d ? d.substring(0, 7) : '';
           },
         },
@@ -125,7 +125,7 @@ export default function PriceChart({ daily, pivots }: Props) {
         grid: { color: 'rgba(255,255,255,0.04)' },
       },
     },
-  }), []);
+  }), [daily]);
 
   return (
     <div className="section" id="sectionChart">

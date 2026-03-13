@@ -5,12 +5,14 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 
+from backend.schemas.system import UpdateStatusResponse
+
 router = APIRouter(tags=["system"])
 
 _LOG_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "auto_update.log"
 
 
-@router.get("/update-status")
+@router.get("/update-status", response_model=UpdateStatusResponse)
 def api_update_status():
     from auto_update import load_update_status
 

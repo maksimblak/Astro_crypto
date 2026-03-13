@@ -10,12 +10,20 @@ import numpy as np
 import pandas as pd
 import requests
 
-from astro_shared import DB_PATH
-from derivatives_history import (
-    aggregate_derivatives_history,
-    fetch_derivatives_history,
-    save_derivatives_history_to_db,
-)
+try:
+    from .config import DB_PATH
+    from .derivatives_history import (
+        aggregate_derivatives_history,
+        fetch_derivatives_history,
+        save_derivatives_history_to_db,
+    )
+except ImportError:
+    from config import DB_PATH
+    from derivatives_history import (
+        aggregate_derivatives_history,
+        fetch_derivatives_history,
+        save_derivatives_history_to_db,
+    )
 
 
 FEATURE_SOURCE_VERSION = "market_features_v3"

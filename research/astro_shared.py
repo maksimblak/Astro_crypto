@@ -1,16 +1,27 @@
 from __future__ import annotations
 
 import math
-import os
 from datetime import date, datetime, timedelta
 from functools import lru_cache
+from pathlib import Path
 
 from skyfield.api import Loader, Topos
 from skyfield.framelib import ecliptic_frame
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "data", "btc_research.duckdb")
-_sky_loader = Loader(os.path.join(BASE_DIR, "data"))
+try:
+    from .config import DB_PATH, today_local_date, yfinance_exclusive_end
+except ImportError:
+    from config import DB_PATH, today_local_date, yfinance_exclusive_end
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BASE_DIR / "data"
+_EPHEMERIS_NAME = "de421.bsp"
+_EPHEMERIS_SEARCH_PATHS = [
+    DATA_DIR / _EPHEMERIS_NAME,
+    BASE_DIR / _EPHEMERIS_NAME,
+]
+_ephemeris_path = next((path for path in _EPHEMERIS_SEARCH_PATHS if path.exists()), None)
+_sky_loader = Loader(str((_ephemeris_path or (DATA_DIR / _EPHEMERIS_NAME)).parent))
 
 ZODIAC_SIGNS = [
     "Овен", "Телец", "Близнецы", "Рак",
@@ -77,7 +88,14 @@ ECLIPSE_DATES = [datetime.strptime(event_date, "%Y-%m-%d") for event_date, _ in 
 # ---------------------------------------------------------------------------
 # Skyfield globals (loaded once)
 # ---------------------------------------------------------------------------
-_eph = _sky_loader("de421.bsp")
+try:
+    _eph = _sky_loader(_EPHEMERIS_NAME)
+except OSError as exc:
+    searched_paths = ", ".join(str(path) for path in _EPHEMERIS_SEARCH_PATHS)
+    raise RuntimeError(
+        f"Unable to load {_EPHEMERIS_NAME}. Checked {searched_paths}; "
+        "if it is not present locally, automatic download also failed."
+    ) from exc
 _ts = _sky_loader.timescale()
 _earth = _eph["earth"]
 _sun = _eph["sun"]
@@ -300,15 +318,6 @@ def julian_date(d) -> float:
 
 def get_zodiac_sign(lon_deg: float) -> str:
     return ZODIAC_SIGNS[int(lon_deg % 360 / 30)]
-
-
-def today_local_date() -> date:
-    return datetime.now().astimezone().date()
-
-
-def yfinance_exclusive_end(base_date: date | None = None) -> str:
-    current_date = base_date or today_local_date()
-    return (current_date + timedelta(days=1)).isoformat()
 
 
 def apply_bh_correction(records: list[dict], p_key: str = "p_value", q_key: str = "q_value") -> list[dict]:
