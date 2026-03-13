@@ -1,26 +1,30 @@
 # Crypto Ideas
 
-Исследовательский проект по BTC с двумя основными направлениями:
+Исследовательский проект по BTC с тремя основными слоями:
 
-- сбор и нормализация исторических рыночных данных в SQLite;
-- исследовательские модели и астрологические/рыночные backtest-скрипты;
-- локальный Flask-дашборд поверх подготовленной базы.
+- `research/` — загрузка рыночных данных, расчёт признаков, astro- и market-backtests;
+- `backend/` — FastAPI API поверх подготовленной DuckDB-базы;
+- `frontend/` — React/Vite dashboard, который можно собрать и раздавать через backend.
 
-Проект хранит данные в `data/btc_research.db` и использует набор standalone-скриптов из `research/` для обновления таблиц и построения аналитики.
+Основная база проекта: `data/btc_research.duckdb`.
 
 ## Структура
 
-- `research/` — подготовка данных, backtests, астрологические исследования, расчет признаков.
-- `dashboard/` — Flask backend и HTML-шаблон дашборда.
-- `data/` — SQLite база, CSV и служебные артефакты обновления.
-- `charts/` — сохраненные графики.
-- `run.py` — локальный запуск дашборда.
+- `research/` — data pipeline, astro scoring, feature engineering, backtests.
+- `backend/` — FastAPI routers и доступ к DuckDB.
+- `dashboard/` — расчёт market regime и автообновление пайплайна.
+- `frontend/` — SPA-интерфейс для календаря, режима и статистики.
+- `data/` — DuckDB, логи автообновления, CSV-артефакты.
+- `charts/` — сохранённые графики исследований.
+- `run.py` — локальный запуск API на Uvicorn.
 
 ## Требования
 
 - Python 3.12+
-- SQLite
+- Node.js 20.19+ или 22.12+ для сборки frontend через Vite 7
 - доступ в интернет для `yfinance` и внешних API, если обновляются market features
+
+Астро-часть использует Skyfield и файл эфемерид `de421.bsp`. Проект ищет его в `data/de421.bsp` и в корне репозитория. Если локального файла нет, Skyfield попробует скачать его автоматически.
 
 ## Установка
 
@@ -31,44 +35,55 @@ pip install -U pip
 pip install -e .
 ```
 
-Если editable-установка не нужна:
+Для frontend:
 
 ```bash
-pip install .
+cd frontend
+npm install
 ```
 
 ## Быстрый старт
 
-1. Инициализировать и обновить базу:
+1. Обновить рыночные данные и pivots:
 
 ```bash
 python3 research/main.py
 ```
 
-2. Запустить дашборд:
+2. Построить astro scoring и расширенные pivot-профили:
+
+```bash
+python3 research/astro_scoring.py
+python3 research/astro_extended_analysis.py
+```
+
+3. Запустить API:
 
 ```bash
 python3 run.py
 ```
 
-3. Открыть:
+4. Открыть backend со встроенным production-build frontend:
 
 ```text
-http://localhost:5000
+http://127.0.0.1:8000
 ```
+
+Для отдельной frontend-разработки:
+
+```bash
+cd frontend
+npm run dev
+```
+
+Vite dev server проксирует `/api` на `http://localhost:8000`.
 
 ## Полезные команды
 
-Обновить pivots и market features:
+Обновить только market features и derivatives history:
 
 ```bash
-python3 research/main.py
-```
-
-Запустить natal-transit анализ:
-
-```bash
-python3 research/astro_natal_transits_test.py --start 2016-01-01 --orb 3
+python3 research/market_features.py
 ```
 
 Backtest market features:
@@ -77,29 +92,35 @@ Backtest market features:
 python3 research/backtest_market_features.py
 ```
 
-## Зависимости
+Natal-transit анализ:
 
-Основные библиотеки проекта:
+```bash
+python3 research/astro_natal_transits_test.py --start 2016-01-01 --orb 3
+```
 
-- `Flask`
-- `matplotlib`
+Собрать frontend:
+
+```bash
+cd frontend
+npm run build
+```
+
+## Основные зависимости
+
+- `fastapi`
+- `uvicorn`
+- `duckdb`
 - `numpy`
 - `pandas`
-- `PyEphem`
-- `requests`
 - `scipy`
+- `skyfield`
+- `requests`
 - `yfinance`
+- `react`
+- `vite`
 
-## Замечания по текущей архитектуре
+## Архитектурные замечания
 
-- Проект пока ориентирован на запуск скриптов напрямую из `research/`.
-- База данных является центральным слоем обмена между research-скриптами и дашбордом.
-- Многие исследования ретроспективные: результаты не стоит трактовать как real-time сигналы без отдельной out-of-sample проверки.
-
-## Следующий разумный шаг
-
-Если проект будет развиваться дальше, имеет смысл:
-
-- превратить `research/` и `dashboard/` в полноценные пакеты;
-- добавить автотесты для data pipeline и статистических функций;
-- фиксировать версии экспериментов и параметры прогонов в БД.
+- Data pipeline и dashboard используют одну DuckDB-базу как общий источник данных.
+- `dashboard/auto_update.py` может автоматически прогонять pipeline по расписанию.
+- Астро-результаты и market regime являются исследовательскими метриками, а не торговыми рекомендациями.
