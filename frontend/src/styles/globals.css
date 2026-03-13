@@ -447,6 +447,252 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   margin-top: 4px;
 }
 
+/* ═══ Cycle Hero (redesigned) ═══ */
+.cycle-hero {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.cycle-hero > * {
+  animation: fadeInUp 0.45s ease both;
+}
+.cycle-hero > *:nth-child(2) { animation-delay: 0.06s; }
+.cycle-hero > *:nth-child(3) { animation-delay: 0.12s; }
+.cycle-hero > *:nth-child(4) { animation-delay: 0.18s; }
+
+.cycle-hero-main {
+  flex: 1 1 320px;
+  min-width: 280px;
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  border: 1px solid var(--border-glow);
+  background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+}
+.cycle-hero-main.bull {
+  background: linear-gradient(135deg, rgba(0,255,136,0.12), rgba(0,212,255,0.05));
+}
+.cycle-hero-main.bear {
+  background: linear-gradient(135deg, rgba(255,59,92,0.12), rgba(245,158,11,0.05));
+}
+.cycle-hero-main.neutral {
+  background: linear-gradient(135deg, rgba(59,130,246,0.10), rgba(0,212,255,0.04));
+}
+
+/* Score Arc Gauges */
+.score-arc-card {
+  flex: 0 0 auto;
+  min-width: 140px;
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 20px 24px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+}
+.score-arc-card:hover {
+  border-color: rgba(255,255,255,0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.score-arc-svg { display: block; }
+.score-arc-fill { transition: stroke-dasharray 0.8s ease; }
+.score-arc-pct {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+  margin-top: -4px;
+  text-align: center;
+}
+.score-arc-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text2);
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+/* Cycle Price Card */
+.cycle-price-card {
+  flex: 0 0 auto;
+  min-width: 160px;
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 18px 20px;
+  transition: all 0.25s ease;
+}
+.cycle-price-card:hover {
+  border-color: rgba(255,255,255,0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.cpc-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.9px;
+  color: var(--text2); font-weight: 600;
+}
+.cpc-price {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 26px; font-weight: 700; margin-top: 6px; color: var(--text);
+}
+.cpc-date { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.cpc-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+}
+.cpc-row-label { font-size: 11px; color: var(--text3); }
+.cpc-row-value {
+  font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700;
+}
+
+/* Bias Bar */
+.bias-bar { margin-top: 18px; }
+.bias-bar-track {
+  height: 6px; border-radius: 3px;
+  background: linear-gradient(90deg, var(--bull) 0%, var(--text3) 50%, var(--bear) 100%);
+  position: relative; opacity: 0.5;
+}
+.bias-bar-marker {
+  position: absolute; top: 50%; transform: translate(-50%, -50%);
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--bg-card);
+  box-shadow: 0 0 12px rgba(255,255,255,0.4);
+  transition: left 0.8s ease;
+}
+.bias-bar-labels {
+  display: flex; justify-content: space-between;
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--text3); margin-top: 6px;
+}
+
+/* ═══ Metric Groups ═══ */
+.metric-group { margin-top: 24px; animation: fadeInUp 0.4s ease both; }
+.metric-group-title {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px;
+  color: var(--text3); font-weight: 700; margin-bottom: 10px; padding-left: 2px;
+}
+.metric-group-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;
+}
+.metric-group-grid.metric-group-wide {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+/* ═══ Enhanced Metric Cards ═══ */
+.metric-card {
+  background: var(--bg-card2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 18px 20px;
+  transition: all 0.25s ease;
+}
+.metric-card:hover {
+  border-color: rgba(255,255,255,0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.metric-card .m-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.9px;
+  color: var(--text2); font-weight: 600;
+}
+.metric-card .m-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 26px; font-weight: 700; margin-top: 6px;
+}
+.metric-card .m-sub {
+  font-size: 11px; color: var(--text3); margin-top: 6px;
+}
+.metric-card .m-sub-accent {
+  font-size: 12px; color: var(--text2); margin-top: 8px; line-height: 1.4;
+}
+.metric-card .m-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border);
+}
+.metric-card .m-row:first-of-type { margin-top: 10px; }
+.metric-card .m-row-label { font-size: 11px; color: var(--text3); }
+.metric-card .m-row-value {
+  font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600;
+}
+
+/* ═══ Threshold Bars ═══ */
+.threshold-bar { margin-top: 12px; }
+.threshold-track {
+  height: 4px; border-radius: 2px;
+  background: linear-gradient(90deg,
+    rgba(0,255,136,0.2) 0%, rgba(255,255,255,0.06) 20%,
+    rgba(255,255,255,0.06) 80%, rgba(255,59,92,0.2) 100%);
+  position: relative; overflow: visible;
+}
+.threshold-marker {
+  position: absolute; top: 50%; transform: translate(-50%, -50%);
+  width: 10px; height: 10px; border-radius: 50%;
+  transition: left 0.8s ease;
+}
+.threshold-labels {
+  display: flex; justify-content: space-between;
+  font-size: 9px; color: var(--text3); margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ═══ Pi Distance Bar ═══ */
+.pi-distance-bar { margin-top: 10px; }
+.pi-distance-track {
+  height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,0.06); position: relative;
+}
+.pi-distance-fill {
+  height: 100%; border-radius: 2px; transition: width 0.8s ease;
+}
+.pi-distance-label-cross {
+  position: absolute; right: 0; top: 8px;
+  font-size: 9px; color: var(--text3);
+}
+
+/* Zone badges */
+.zone-badge {
+  font-size: 10px; font-weight: 600; padding: 2px 8px;
+  border-radius: 4px; letter-spacing: 0.3px; white-space: nowrap;
+}
+.zone-badge.bull { color: var(--bull); background: var(--bull-dim); }
+.zone-badge.bear { color: var(--bear); background: var(--bear-dim); }
+.zone-badge.neutral { color: var(--text2); background: rgba(255,255,255,0.04); }
+
+/* Table scroll wrapper */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* Chart header with range pills */
+.chart-header {
+  display: flex; justify-content: space-between;
+  align-items: center; margin-bottom: 4px;
+}
+.chart-header-title {
+  font-size: 13px; font-weight: 600; color: var(--text2);
+  letter-spacing: 0.3px;
+}
+.chart-range-btns { display: flex; gap: 4px; }
+.chart-range-btn {
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+  color: var(--text3); font-size: 11px; font-weight: 600;
+  padding: 3px 10px; border-radius: 6px; cursor: pointer;
+  transition: all 0.15s ease; font-family: 'JetBrains Mono', monospace;
+}
+.chart-range-btn:hover { background: rgba(255,255,255,0.08); color: var(--text1); }
+.chart-range-btn.active {
+  background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.3);
+  color: #60a5fa;
+}
+
+/* ═══ Animations ═══ */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* Footer */
 .footer {
   text-align: center; padding: 40px 0 24px;
@@ -482,4 +728,8 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   .chart-box, .chart-box-lg { height: 300px; }
   .risk-grid { grid-template-columns: 1fr; }
   .topbar-inner { height: auto; padding: 12px 0; flex-wrap: wrap; gap: 8px; }
+  .cycle-hero { grid-template-columns: 1fr; }
+  .score-arc-card { padding: 16px; }
+  .metric-group-grid, .metric-group-grid.metric-group-wide { grid-template-columns: 1fr; }
+  .cycle-price-card { flex-direction: column; }
 }

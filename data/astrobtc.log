@@ -128,3 +128,9 @@
 1 Failed download:
 2026-03-13 17:53:37,848 yfinance ERROR ['DX-Y.NYB']: KeyError('chart')
 2026-03-13 17:56:10,818 __main__ INFO Загрузка BTC-USD данных за 2016-01-01 — 2026-03-14...
+2026-03-13 17:56:13,220 __main__ INFO Загружено 3725 дней данных.
+2026-03-13 17:56:28,201 __main__ INFO Сохранено 3725 дневных свечей в БД.
+2026-03-13 18:01:23,779 __main__ INFO Сохранено 171 точек разворота в БД.
+2026-03-13 18:01:23,781 __main__ INFO CSV сохранён: /home/makimblack/Рабочий стол/Crypto/Cryprto_ideas/data/btc_peaks_valleys.csv
+2026-03-13 18:01:25,368 __main__ INFO График сохранён: /home/makimblack/Рабочий стол/Crypto/Cryprto_ideas/charts/btc_chart.png
+2026-03-13 18:01:25,531 __main__ INFO БД сохранена: /home/makimblack/Рабочий стол/Crypto/Cryprto_ideas/data/btc_research.duckdb
