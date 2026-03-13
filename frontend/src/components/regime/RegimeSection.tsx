@@ -17,6 +17,7 @@ export default function RegimeSection({ data }: Props) {
     : data.metrics?.oi_price_state_1d === 'short_build' ? 'Short build'
     : data.metrics?.oi_price_state_1d === 'short_cover' ? 'Short cover'
     : data.metrics?.oi_price_state_1d === 'long_unwind' ? 'Long unwind'
+    : data.metrics?.oi_price_state_1d === 'unchanged' ? 'Unchanged'
     : '\u2014';
   const biasLabel = data.bias === 'risk-on' ? 'Risk-on'
     : data.bias === 'risk-off' ? 'Risk-off'

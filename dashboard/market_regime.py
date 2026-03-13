@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+import math
 from statistics import mean, median, pstdev
+
+
+def _safe_round(val, ndigits=2, scale=1):
+    """Round value safely: returns None for None and NaN."""
+    if val is None or (isinstance(val, float) and math.isnan(val)):
+        return None
+    return round(val * scale, ndigits)
 
 # --- Direction thresholds ---
 CLOSE_VS_200_STRONG = 0.10       # Price strongly above 200DMA
@@ -946,33 +954,33 @@ def calculate_regime_history(rows):
                 "setup_label": setup_profile["setup_label"],
                 "setup_tone": setup_profile["setup_tone"],
                 "setup_summary": setup_profile["setup_summary"],
-                "momentum_20": round(momentum_20 * 100, 2) if momentum_20 is not None else None,
-                "momentum_90": round(momentum_90 * 100, 2) if momentum_90 is not None else None,
-                "drawdown_ath": round(drawdown_ath * 100, 2) if drawdown_ath is not None else None,
-                "close_vs_200": round(close_vs_200 * 100, 2) if close_vs_200 is not None else None,
-                "amihud_z_90d": round(metrics["amihud_z_90d"], 2) if metrics["amihud_z_90d"] is not None else None,
-                "range_compression_20d": round(metrics["range_compression_20d"], 2) if metrics["range_compression_20d"] is not None else None,
-                "wiki_views_z_30d": round(metrics["wiki_views_z_30d"], 2) if metrics["wiki_views_z_30d"] is not None else None,
-                "fear_greed_value": round(metrics["fear_greed_value"], 1) if metrics["fear_greed_value"] is not None else None,
-                "funding_rate_z_30d": round(metrics["funding_rate_z_30d"], 2) if metrics["funding_rate_z_30d"] is not None else None,
-                "funding_price_divergence_3d": round(metrics["funding_price_divergence_3d"], 2) if metrics["funding_price_divergence_3d"] is not None else None,
+                "momentum_20": _safe_round(momentum_20, 2, 100),
+                "momentum_90": _safe_round(momentum_90, 2, 100),
+                "drawdown_ath": _safe_round(drawdown_ath, 2, 100),
+                "close_vs_200": _safe_round(close_vs_200, 2, 100),
+                "amihud_z_90d": _safe_round(metrics["amihud_z_90d"]),
+                "range_compression_20d": _safe_round(metrics["range_compression_20d"]),
+                "wiki_views_z_30d": _safe_round(metrics["wiki_views_z_30d"]),
+                "fear_greed_value": _safe_round(metrics["fear_greed_value"], 1),
+                "funding_rate_z_30d": _safe_round(metrics["funding_rate_z_30d"]),
+                "funding_price_divergence_3d": _safe_round(metrics["funding_price_divergence_3d"]),
                 "funding_contrarian_bias_3d": int(metrics["funding_contrarian_bias_3d"]) if metrics["funding_contrarian_bias_3d"] is not None else None,
-                "perp_premium_daily": round(metrics["perp_premium_daily"] * 100, 3) if metrics["perp_premium_daily"] is not None else None,
-                "perp_premium_z_30d": round(metrics["perp_premium_z_30d"], 2) if metrics["perp_premium_z_30d"] is not None else None,
-                "open_interest_delta_1d": round(metrics["open_interest_delta_1d"] * 100, 2) if metrics["open_interest_delta_1d"] is not None else None,
-                "open_interest_delta_z_30d": round(metrics["open_interest_delta_z_30d"], 2) if metrics["open_interest_delta_z_30d"] is not None else None,
-                "oi_price_state_1d": metrics["oi_price_state_1d"],
-                "open_interest_z_30d": round(metrics["open_interest_z_30d"], 2) if metrics["open_interest_z_30d"] is not None else None,
-                "dxy_close": round(metrics["dxy_close"], 2) if metrics["dxy_close"] is not None else None,
-                "dxy_return_20d": round(metrics["dxy_return_20d"] * 100, 2) if metrics["dxy_return_20d"] is not None else None,
-                "dxy_return_z_90d": round(metrics["dxy_return_z_90d"], 2) if metrics["dxy_return_z_90d"] is not None else None,
-                "us10y_yield": round(metrics["us10y_yield"], 2) if metrics["us10y_yield"] is not None else None,
-                "us10y_change_20d_bps": round(metrics["us10y_change_20d_bps"], 1) if metrics["us10y_change_20d_bps"] is not None else None,
-                "us10y_change_z_90d": round(metrics["us10y_change_z_90d"], 2) if metrics["us10y_change_z_90d"] is not None else None,
-                "spx_close": round(metrics["spx_close"], 2) if metrics["spx_close"] is not None else None,
-                "btc_spx_corr_30d": round(metrics["btc_spx_corr_30d"], 2) if metrics["btc_spx_corr_30d"] is not None else None,
-                "unique_addresses_z_30d": round(metrics["unique_addresses_z_30d"], 2) if metrics["unique_addresses_z_30d"] is not None else None,
-                "onchain_activity_z_30d": round(metrics["onchain_activity_z_30d"], 2) if metrics["onchain_activity_z_30d"] is not None else None,
+                "perp_premium_daily": _safe_round(metrics["perp_premium_daily"], 3, 100),
+                "perp_premium_z_30d": _safe_round(metrics["perp_premium_z_30d"]),
+                "open_interest_delta_1d": _safe_round(metrics["open_interest_delta_1d"], 2, 100),
+                "open_interest_delta_z_30d": _safe_round(metrics["open_interest_delta_z_30d"]),
+                "oi_price_state_1d": metrics["oi_price_state_1d"] if isinstance(metrics["oi_price_state_1d"], str) else None,
+                "open_interest_z_30d": _safe_round(metrics["open_interest_z_30d"]),
+                "dxy_close": _safe_round(metrics["dxy_close"]),
+                "dxy_return_20d": _safe_round(metrics["dxy_return_20d"], 2, 100),
+                "dxy_return_z_90d": _safe_round(metrics["dxy_return_z_90d"]),
+                "us10y_yield": _safe_round(metrics["us10y_yield"]),
+                "us10y_change_20d_bps": _safe_round(metrics["us10y_change_20d_bps"], 1),
+                "us10y_change_z_90d": _safe_round(metrics["us10y_change_z_90d"]),
+                "spx_close": _safe_round(metrics["spx_close"]),
+                "btc_spx_corr_30d": _safe_round(metrics["btc_spx_corr_30d"]),
+                "unique_addresses_z_30d": _safe_round(metrics["unique_addresses_z_30d"]),
+                "onchain_activity_z_30d": _safe_round(metrics["onchain_activity_z_30d"]),
             }
         )
 

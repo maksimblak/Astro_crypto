@@ -535,6 +535,8 @@ def build_market_features(df_ohlcv: pd.DataFrame) -> tuple[pd.DataFrame, pd.Data
         features["open_interest_z_30d"] = _rolling_z(features["open_interest_value"], 30, 10)
     elif "open_interest_value" in features and features["open_interest_z_30d"].isna().all():
         features["open_interest_z_30d"] = _rolling_z(features["open_interest_value"], 30, 10)
+    if "open_interest_z_30d" in features:
+        features["open_interest_z_30d"] = features["open_interest_z_30d"].ffill()
     if "open_interest_value" in features:
         features["open_interest_delta_1d"] = features["open_interest_value"].pct_change()
         features["open_interest_delta_z_30d"] = _rolling_z(features["open_interest_delta_1d"], 30, 10)
@@ -560,8 +562,9 @@ def build_market_features(df_ohlcv: pd.DataFrame) -> tuple[pd.DataFrame, pd.Data
             (oi_delta > 0) & (price_return_1d < 0),
             (oi_delta < 0) & (price_return_1d > 0),
             (oi_delta < 0) & (price_return_1d < 0),
+            (oi_delta == 0),
         ]
-        choices = ["long_build", "short_build", "short_cover", "long_unwind"]
+        choices = ["long_build", "short_build", "short_cover", "long_unwind", "unchanged"]
         features["oi_price_state_1d"] = np.select(conditions, choices, default=None)
 
     if "funding_rate_z_30d" in features:
