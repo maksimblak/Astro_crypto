@@ -25,20 +25,22 @@ DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 def _ensure_primary_key(conn, table: str, pk_cols: list[str]):
     """Re-create table with PRIMARY KEY if missing (DuckDB has no ALTER ADD PK)."""
+    tables = [r[0] for r in conn.execute("SELECT table_name FROM duckdb_tables()").fetchall()]
+    if table not in tables:
+        return
     rows = conn.execute(
         "SELECT constraint_type FROM duckdb_constraints() WHERE table_name = ?", [table]
     ).fetchall()
-    has_pk = any(r[0] == "PRIMARY KEY" for r in rows)
-    if has_pk:
+    if any(r[0] == "PRIMARY KEY" for r in rows):
         return
-    # Table exists but without PK — rebuild
-    tmp = f"{table}__tmp"
-    conn.execute(f"ALTER TABLE {table} RENAME TO {tmp}")
+    # Table exists but without PK — rebuild via CTAS + CASCADE drop
+    tmp = f"{table}__rebuild"
+    conn.execute(f"CREATE TABLE {tmp} AS SELECT * FROM {table}")
+    conn.execute(f"DROP TABLE {table} CASCADE")
     cols = conn.execute(f"PRAGMA table_info('{tmp}')").fetchall()
-    col_defs = ", ".join(
-        f"{c[1]} {c[2]}" + (" PRIMARY KEY" if c[1] in pk_cols else "") for c in cols
-    )
-    conn.execute(f"CREATE TABLE {table} ({col_defs})")
+    col_defs = ", ".join(f"{c[1]} {c[2]}" for c in cols)
+    pk_str = ", ".join(pk_cols)
+    conn.execute(f"CREATE TABLE {table} ({col_defs}, PRIMARY KEY ({pk_str}))")
     conn.execute(f"INSERT INTO {table} SELECT * FROM {tmp}")
     conn.execute(f"DROP TABLE {tmp}")
     conn.commit()
@@ -81,6 +83,8 @@ def init_db():
 
     # Fix tables missing PRIMARY KEY (created before constraint was added)
     _ensure_primary_key(conn, "btc_daily", ["date"])
+    _ensure_primary_key(conn, "btc_market_features", ["date"])
+    _ensure_primary_key(conn, "btc_derivatives_history", ["date", "source"])
 
     return conn
 
