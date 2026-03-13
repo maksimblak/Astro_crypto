@@ -99,3 +99,9 @@
 2026-03-13 17:31:26,016 yfinance ERROR 
 1 Failed download:
 2026-03-13 17:31:26,017 yfinance ERROR ['DX-Y.NYB']: KeyError('chart')
+2026-03-13 17:34:53,665 __main__ INFO Загрузка BTC-USD данных за 2016-01-01 — 2026-03-14...
+2026-03-13 17:34:55,963 __main__ INFO Загружено 3725 дней данных.
+2026-03-13 17:35:01,228 __main__ INFO Сохранено 3725 дневных свечей в БД.
+2026-03-13 17:35:06,876 yfinance ERROR 
+1 Failed download:
+2026-03-13 17:35:06,876 yfinance ERROR ['DX-Y.NYB']: KeyError('chart')

@@ -98,7 +98,7 @@ function ProjectionBlock({ proj }: { proj: CycleProjections }) {
 
       {peakPassed && (
         <div className="projection-card warn-banner" style={{ marginTop: '0.5rem', padding: '10px 14px', opacity: 0.85 }}>
-          Модель считает что пик текущего цикла вероятно уже произошёл (ATH ${fmtUsd(dr.current_cycle_top)} от {fmtDate(proj.reference_date)}).
+          Модель считает что пик текущего цикла вероятно уже произошёл (ATH {fmtUsd(dr.current_cycle_top)}).
           Цена ниже ATH на {((1 - proj.current_price / dr.current_cycle_top) * 100).toFixed(0)}%.
         </div>
       )}
@@ -168,8 +168,8 @@ function ProjectionBlock({ proj }: { proj: CycleProjections }) {
           <div className="signal-label">DIMINISHING RETURNS (тек.)</div>
           <div className="signal-value">{dr.current_cycle_roi_x}×</div>
           <div className="signal-note">
-            ATH ${fmtUsd(dr.current_cycle_top)} от дна ${fmtUsd(dr.current_cycle_bottom)}.
-            Модель ожидала {dr.current_cycle_projected_roi_x}× = ${fmtUsd(dr.current_cycle_projected_peak)}.
+            ATH {fmtUsd(dr.current_cycle_top)} от дна {fmtUsd(dr.current_cycle_bottom)}.
+            Модель ожидала {dr.current_cycle_projected_roi_x}× = {fmtUsd(dr.current_cycle_projected_peak)}.
             {dr.current_outperformance >= 1
               ? ` Перевыполнение ${dr.current_outperformance}×.`
               : ` Недобор до модели.`}

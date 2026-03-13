@@ -417,7 +417,7 @@ def build_projections(
         dim_returns["projected_peak_conservative"],
         dim_returns["projected_peak_from_bottom"],
         gr_ceiling["next_cycle_ceiling"],
-        pl_band_next[1],                           # Power law +2σ at next cycle peak
+        pl_fair_next,                              # Power law fair (not +2σ — too speculative)
     ]
     next_cycle_targets = sorted([p for p in next_cycle_targets if p and p > 0])
     next_median = float(np.median(next_cycle_targets)) if next_cycle_targets else None
