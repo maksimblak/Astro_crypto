@@ -82,6 +82,8 @@ const zonePlugin: Plugin<'line'> = {
   },
 };
 
+const PLUGINS: Plugin<'line'>[] = [zonePlugin];
+
 export default function RegimeChart({ history }: Props) {
   const [range, setRange] = useState<Range>('2Y');
   const filtered = useMemo(() => sliceHistory(history, range), [history, range]);
@@ -157,9 +159,14 @@ export default function RegimeChart({ history }: Props) {
         padding: 12,
         cornerRadius: 10,
         callbacks: {
-          title: (items: { dataIndex: number }[]) => fmtDate(filtered[items[0].dataIndex].date),
+          title: (items: { dataIndex: number }[]) => {
+            if (!items.length) return '';
+            return fmtDate(filtered[items[0].dataIndex]?.date ?? '');
+          },
           afterBody: (items: { dataIndex: number }[]) => {
+            if (!items.length) return [];
             const h = filtered[items[0].dataIndex];
+            if (!h) return [];
             return [
               `Режим: ${h.regime_label}`,
               `Direction: ${h.direction_score ?? h.regime_score}`,
@@ -220,7 +227,7 @@ export default function RegimeChart({ history }: Props) {
         </div>
       </div>
       <div className="chart-box chart-box-lg">
-        <Line data={chartData} options={options} plugins={[zonePlugin]} />
+        <Line data={chartData} options={options} plugins={PLUGINS} />
       </div>
     </div>
   );

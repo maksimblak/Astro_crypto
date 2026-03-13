@@ -265,7 +265,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
 }
 .rg-setup-info { flex: 1; min-width: 240px; }
 .rg-setup-label { font-size: 20px; font-weight: 800; line-height: 1.15; }
-.rg-setup-text { margin-top: 6px; font-size: 13px; color: var(--text2); line-height: 1.5; max-width: 64ch; }
+.rg-setup-text { margin-top: 6px; font-size: 13px; color: var(--text2); line-height: 1.5; max-width: 64ch; overflow-wrap: break-word; }
 
 .rg-hero-bottom {
   display: grid;
@@ -290,9 +290,9 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
 }
 .rg-regime-title {
   font-size: 26px; font-weight: 800; line-height: 1.1;
-  margin-top: 6px; letter-spacing: -0.5px;
+  margin-top: 6px; letter-spacing: -0.5px; overflow-wrap: break-word;
 }
-.rg-regime-summary { margin-top: 8px; font-size: 13px; color: var(--text2); line-height: 1.5; }
+.rg-regime-summary { margin-top: 8px; font-size: 13px; color: var(--text2); line-height: 1.5; overflow-wrap: break-word; }
 .rg-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
 .rg-chip {
   border-radius: 999px; padding: 4px 10px; font-size: 11px; font-weight: 700;
@@ -375,7 +375,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   transition: transform 0.2s, box-shadow 0.2s;
 }
 .rg-metric:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
-.rg-metric-wide { grid-column: span 1; }
+.rg-metric-wide { /* combined metric with .rg-metric-row inside */ }
 .rg-metric-label {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.9px;
   color: var(--text3); font-weight: 700;
@@ -397,6 +397,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
 .rg-zbar-track {
   flex: 1; height: 4px; background: rgba(255,255,255,0.04);
   border-radius: 2px; position: relative;
+  margin: 0 4px;
 }
 .rg-zbar-center {
   position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px;
@@ -405,7 +406,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
 .rg-zbar-dot {
   position: absolute; top: 50%; width: 8px; height: 8px;
   border-radius: 50%; transform: translate(-50%, -50%);
-  transition: left 0.6s ease, background 0.3s;
+  transition: background 0.3s;
 }
 
 /* ── Signals ── */
@@ -421,13 +422,14 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
 }
 .signal-card {
   background: var(--bg-card2); border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
   border-radius: var(--radius-sm); padding: 14px 16px;
   transition: transform 0.2s;
 }
 .signal-card:hover { transform: translateY(-1px); }
-.signal-card.bull { border-left: 3px solid var(--bull); }
-.signal-card.bear { border-left: 3px solid var(--bear); }
-.signal-card.neutral { border-left: 3px solid var(--text3); }
+.signal-card.bull { border-left-color: var(--bull); }
+.signal-card.bear { border-left-color: var(--bear); }
+.signal-card.neutral { border-left-color: var(--text3); }
 .signal-label {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
   color: var(--text3); font-weight: 600;
@@ -856,6 +858,9 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   .metric-group-grid, .metric-group-grid.metric-group-wide { grid-template-columns: 1fr; }
   .chart-header { flex-wrap: wrap; gap: 8px; }
   /* Regime responsive */
+  .rg-setup-score { font-size: 36px; letter-spacing: -1px; }
+  .rg-setup-label { font-size: 17px; }
+  .rg-setup { padding: 16px 18px; gap: 14px; }
   .rg-hero-bottom { grid-template-columns: 1fr; }
   .rg-arcs { flex-direction: row; justify-content: center; flex-wrap: wrap; }
   .rg-arc-card { width: auto; flex: 1; min-width: 120px; }

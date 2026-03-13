@@ -1,4 +1,4 @@
-import type { RegimeData } from '../../types/api';
+import type { RegimeData, RegimeMetrics } from '../../types/api';
 import { fmtDate } from '../../utils/dates';
 import { fmtUsd, regimeTone, stressTone } from '../../utils/format';
 import SignalCard from './SignalCard';
@@ -52,31 +52,33 @@ const OI_STATE_TONES: Record<string, string> = {
 
 /* ═══ SVG Score Arc (semicircle gauge) ═══ */
 
+const ARC_COLORS = { bull: 'var(--bull)', bear: 'var(--bear)', neutral: 'var(--neon-cyan)' } as const;
+const ARC_GLOWS = { bull: 'var(--glow-green)', bear: 'var(--glow-red)', neutral: 'var(--glow-cyan)' } as const;
+
 function ScoreArc({ value, min, max, label, tone }: {
   value: number; min: number; max: number; label: string; tone: 'bull' | 'bear' | 'neutral';
 }) {
   const R = 54, CX = 60, CY = 60;
-  const half = Math.PI * R; // semicircle length
-  const ratio = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  const half = Math.PI * R;
+  const raw = (value - min) / (max - min);
+  const ratio = Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0;
   const filled = half * ratio;
-  const colors = { bull: 'var(--bull)', bear: 'var(--bear)', neutral: 'var(--neon-cyan)' };
-  const glows = { bull: 'var(--glow-green)', bear: 'var(--glow-red)', neutral: 'var(--glow-cyan)' };
 
   return (
     <div className="rg-arc-card">
-      <svg viewBox="0 0 120 68" className="rg-arc-svg">
+      <svg viewBox="0 0 120 68" className="rg-arc-svg" role="img" aria-label={`${label}: ${value}`}>
         <path
           d={`M ${CX - R} ${CY} A ${R} ${R} 0 0 1 ${CX + R} ${CY}`}
           fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="7" strokeLinecap="round"
         />
         <path
           d={`M ${CX - R} ${CY} A ${R} ${R} 0 0 1 ${CX + R} ${CY}`}
-          fill="none" stroke={colors[tone]} strokeWidth="7" strokeLinecap="round"
+          fill="none" stroke={ARC_COLORS[tone]} strokeWidth="7" strokeLinecap="round"
           strokeDasharray={`${filled} ${half}`}
-          style={{ filter: `drop-shadow(${glows[tone]})`, transition: 'stroke-dasharray 0.8s ease' }}
+          style={{ filter: `drop-shadow(${ARC_GLOWS[tone]})`, transition: 'stroke-dasharray 0.8s ease' }}
         />
       </svg>
-      <div className="rg-arc-value" style={{ color: colors[tone] }}>
+      <div className="rg-arc-value" style={{ color: ARC_COLORS[tone] }}>
         {value > 0 ? '+' : ''}{value}
       </div>
       <div className="rg-arc-label">{label}</div>
@@ -127,19 +129,6 @@ function MetricCard({ label, value, sub, tone, zValue, zInvert }: {
 /* ═══ Main Component ═══ */
 
 export default function RegimeSection({ data }: Props) {
-  const tone = regimeTone(data.regime_code);
-  const stressChipTone = stressTone(data.stress_tone);
-  const contextChipTone = stressTone(data.context_tone);
-  const setupTone_ = stressTone(data.setup_tone);
-  const m = data.metrics || {} as Record<string, any>;
-
-  const biasLabel = data.bias === 'risk-on' ? 'Risk-on'
-    : data.bias === 'risk-off' ? 'Risk-off' : 'Нейтрально';
-
-  const oiState = m.oi_price_state_1d as string | undefined;
-  const oiLabel = oiState ? (OI_STATE_LABELS[oiState] ?? DASH) : DASH;
-  const oiTone = oiState ? (OI_STATE_TONES[oiState] ?? '') : '';
-
   if (data.error) {
     return (
       <div className="section" id="sectionRegime">
@@ -155,6 +144,19 @@ export default function RegimeSection({ data }: Props) {
       </div>
     );
   }
+
+  const tone = regimeTone(data.regime_code);
+  const stressChipTone = stressTone(data.stress_tone);
+  const contextChipTone = stressTone(data.context_tone);
+  const setupTone_ = stressTone(data.setup_tone);
+  const m = data.metrics ?? ({} as RegimeMetrics);
+
+  const biasLabel = data.bias === 'risk-on' ? 'Risk-on'
+    : data.bias === 'risk-off' ? 'Risk-off' : 'Нейтрально';
+
+  const oiState = m.oi_price_state_1d;
+  const oiLabel = oiState ? (OI_STATE_LABELS[oiState] ?? DASH) : DASH;
+  const oiTone = oiState ? (OI_STATE_TONES[oiState] ?? '') : '';
 
   return (
     <div className="section" id="sectionRegime">
@@ -307,19 +309,19 @@ export default function RegimeSection({ data }: Props) {
           <div className="rg-signal-section">
             <div className="rg-signal-title">Direction signals</div>
             <div className="signal-grid">
-              {(data.direction_signals || []).map((s, i) => <SignalCard key={i} signal={s} />)}
+              {data.direction_signals.map(s => <SignalCard key={s.label} signal={s} />)}
             </div>
           </div>
           <div className="rg-signal-section">
             <div className="rg-signal-title">Stress signals</div>
             <div className="signal-grid">
-              {(data.stress_signals || []).map((s, i) => <SignalCard key={i} signal={s} />)}
+              {data.stress_signals.map(s => <SignalCard key={s.label} signal={s} />)}
             </div>
           </div>
           <div className="rg-signal-section">
             <div className="rg-signal-title">External context</div>
             <div className="signal-grid">
-              {(data.context_signals || []).map((s, i) => <SignalCard key={i} signal={s} />)}
+              {data.context_signals.map(s => <SignalCard key={s.label} signal={s} />)}
             </div>
           </div>
         </div>
