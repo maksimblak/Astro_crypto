@@ -728,8 +728,8 @@ tbody tr:hover td { background: rgba(255,255,255,0.02); }
   .chart-box, .chart-box-lg { height: 300px; }
   .risk-grid { grid-template-columns: 1fr; }
   .topbar-inner { height: auto; padding: 12px 0; flex-wrap: wrap; gap: 8px; }
-  .cycle-hero { grid-template-columns: 1fr; }
+  .cycle-hero { flex-direction: column; }
   .score-arc-card { padding: 16px; }
   .metric-group-grid, .metric-group-grid.metric-group-wide { grid-template-columns: 1fr; }
-  .cycle-price-card { flex-direction: column; }
+  .chart-header { flex-wrap: wrap; gap: 8px; }
 }

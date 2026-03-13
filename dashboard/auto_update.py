@@ -185,10 +185,10 @@ def _cleanup_active_child():
 
 def _kill_orphan_scripts():
     """Best-effort kill of orphaned pipeline scripts from previous runs."""
-    script_names = {Path(args[-1]).name for _, args in PIPELINE_STEPS}
+    script_paths = {args[-1] for _, args in PIPELINE_STEPS}
     try:
         out = subprocess.run(
-            ["pgrep", "-f", "|".join(script_names)],
+            ["pgrep", "-f", "|".join(script_paths)],
             capture_output=True, text=True, timeout=5,
         )
         for line in out.stdout.strip().splitlines():

@@ -3,6 +3,7 @@ import { fmtDate } from '../../utils/dates';
 import { fmtUsd } from '../../utils/format';
 import SignalCard from '../regime/SignalCard';
 import CycleChart from './CycleChart';
+import { zoneLabel } from './cycleUtils';
 
 interface Props {
   data?: CycleData;
@@ -10,17 +11,6 @@ interface Props {
 }
 
 /* ═══ Helpers ═══ */
-
-function zoneLabel(zone: string): string {
-  const map: Record<string, string> = {
-    top_zone: 'Top zone',
-    top_watch: 'Top watch',
-    bottom_zone: 'Bottom zone',
-    bottom_watch: 'Bottom watch',
-    mixed: 'Mixed',
-  };
-  return map[zone] || 'Neutral';
-}
 
 function zoneTone(zone: string): 'bull' | 'bear' | 'neutral' {
   if (zone === 'top_zone' || zone === 'top_watch') return 'bear';
@@ -579,13 +569,13 @@ export default function CycleSection({ data, error }: Props) {
               <div className="m-row">
                 <span className="m-row-label">111DMA</span>
                 <span className="m-row-value">
-                  {fmtUsd(m?.pi_sma111 ?? undefined)}
+                  {fmtUsd(m?.pi_sma111)}
                 </span>
               </div>
               <div className="m-row">
                 <span className="m-row-label">350DMA×2</span>
                 <span className="m-row-value">
-                  {fmtUsd(m?.pi_sma350x2 ?? undefined)}
+                  {fmtUsd(m?.pi_sma350x2)}
                 </span>
               </div>
               <div className="m-row">

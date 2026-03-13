@@ -14,6 +14,7 @@ import {
 import type { ChartData, ChartOptions, Plugin } from 'chart.js';
 import type { CycleHistory } from '../../types/api';
 import { fmtDate } from '../../utils/dates';
+import { zoneLabel } from './cycleUtils';
 
 ChartJS.register(CategoryScale, LinearScale, LogarithmicScale, PointElement, LineElement, Tooltip, Legend, Filler);
 
@@ -23,22 +24,14 @@ interface Props {
 
 type Range = '1Y' | '2Y' | 'ALL';
 
-function zoneLabel(zone: string): string {
-  if (zone === 'top_zone') return 'Top zone';
-  if (zone === 'top_watch') return 'Top watch';
-  if (zone === 'bottom_zone') return 'Bottom zone';
-  if (zone === 'bottom_watch') return 'Bottom watch';
-  if (zone === 'mixed') return 'Mixed';
-  return 'Neutral';
-}
-
 /** Chart.js plugin: paint score-zone background bands */
 const zonePlugin: Plugin<'line'> = {
   id: 'zoneBackground',
   beforeDraw(chart) {
-    const { ctx, chartArea: { top, bottom, left, right }, scales } = chart;
+    const { ctx, chartArea, scales } = chart;
+    if (!chartArea || !scales['y']) return;
+    const { top, bottom, left, right } = chartArea;
     const yScale = scales['y'];
-    if (!yScale) return;
 
     const bands: { lo: number; hi: number; color: string }[] = [
       { lo: 0.70, hi: 1.05, color: 'rgba(255,59,92,0.06)' },   // top zone
