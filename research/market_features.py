@@ -42,7 +42,7 @@ PRESERVED_RAW_FEATURE_COLUMNS = [
     "spx_close",
 ]
 YFINANCE_TICKERS = {
-    "dxy_close": "DX-Y.NYB",
+    "dxy_close": ["DX-Y.NYB", "DX=F", "UUP"],
     "us10y_yield": "^TNX",
     "spx_close": "^GSPC",
 }
@@ -231,7 +231,14 @@ def _fetch_blockchain_chart(session: requests.Session, chart_name: str, value_co
 
 def _download_yfinance_close(ticker: str, start_date: str, end_date: str) -> pd.Series:
     end_exclusive = yfinance_exclusive_end(pd.Timestamp(end_date).date())
-    df = yf.download(ticker, start=start_date, end=end_exclusive, progress=False, auto_adjust=False)
+    df = yf.download(
+        ticker,
+        start=start_date,
+        end=end_exclusive,
+        progress=False,
+        auto_adjust=False,
+        threads=False,
+    )
     if df.empty:
         return pd.Series(dtype="float64")
     if isinstance(df.columns, pd.MultiIndex):
@@ -243,6 +250,29 @@ def _download_yfinance_close(ticker: str, start_date: str, end_date: str) -> pd.
         index = index.tz_localize(None)
     series.index = index
     return series.sort_index()
+
+
+def _download_first_available_close(
+    tickers: str | list[str],
+    start_date: str,
+    end_date: str,
+    minimum_rows: int = 30,
+) -> tuple[pd.Series, str | None]:
+    ticker_list = [tickers] if isinstance(tickers, str) else list(tickers)
+    last_error: Exception | None = None
+
+    for ticker in ticker_list:
+        try:
+            series = _download_yfinance_close(ticker, start_date, end_date)
+        except Exception as exc:  # pragma: no cover - network best effort
+            last_error = exc
+            continue
+        if len(series) >= minimum_rows:
+            return series, ticker
+
+    if last_error is not None:
+        raise last_error
+    return pd.Series(dtype="float64"), None
 
 
 def _normalize_us10y_series(series: pd.Series) -> pd.Series:
@@ -268,7 +298,11 @@ def _frame_from_series(series: pd.Series, value_column: str) -> pd.DataFrame:
 def _fetch_macro_frames(start_date: str, end_date: str) -> list[pd.DataFrame]:
     frames = []
     try:
-        dxy_close = _download_yfinance_close(YFINANCE_TICKERS["dxy_close"], start_date, end_date)
+        dxy_close, dxy_source = _download_first_available_close(
+            YFINANCE_TICKERS["dxy_close"],
+            start_date,
+            end_date,
+        )
         if not dxy_close.empty:
             dxy_return_20d = dxy_close.pct_change(20)
             frames.append(
@@ -281,6 +315,7 @@ def _fetch_macro_frames(start_date: str, end_date: str) -> list[pd.DataFrame]:
                     }
                 ).sort_values("date")
             )
+            print(f"[market_features] dxy source: {dxy_source}")
     except Exception as exc:  # pragma: no cover - network best effort
         print(f"[market_features] dxy unavailable: {exc}")
 
