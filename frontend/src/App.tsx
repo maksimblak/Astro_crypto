@@ -6,11 +6,14 @@ import CycleSection from './components/cycle/CycleSection';
 import RegimeSection from './components/regime/RegimeSection';
 import RiskSection from './components/risk/RiskSection';
 import StatsSection from './components/stats/StatsSection';
+import BacktestSection from './components/backtest/BacktestSection';
 import { useToday, useCalendar, useDaily, usePivots, useStats, useRegime, useCycle } from './hooks/useDashboardData';
 import { normalizeScoreScale } from './utils/scores';
 import { localDateKey } from './utils/dates';
+import { useWebSocket } from './hooks/useWebSocket';
 
 export default function App() {
+  useWebSocket();
   const today = useToday();
   const calendar = useCalendar();
   const daily = useDaily();
@@ -49,6 +52,7 @@ export default function App() {
               />
             )}
             {stats.data && <StatsSection data={stats.data} />}
+            <BacktestSection />
           </>
         )}
         <div className="footer">

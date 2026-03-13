@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../api/client';
+import { api, type BacktestParams } from '../api/client';
 
 const STALE = 5 * 60 * 1000;
 
@@ -29,4 +29,13 @@ export function useRegime() {
 
 export function useCycle() {
   return useQuery({ queryKey: ['cycle'], queryFn: api.cycle, staleTime: STALE });
+}
+
+export function useBacktest(params: BacktestParams = {}) {
+  return useQuery({
+    queryKey: ['backtest', params],
+    queryFn: () => api.backtest(params),
+    staleTime: 30 * 60 * 1000, // 30 min
+    enabled: false, // only fetch on demand
+  });
 }

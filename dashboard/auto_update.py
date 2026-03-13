@@ -203,6 +203,37 @@ def _kill_orphan_scripts():
         pass
 
 
+def _notify_ws_clients(finished_at: str) -> None:
+    """Best-effort cache invalidation + WebSocket broadcast after successful pipeline run."""
+    import logging
+    _log = logging.getLogger("astrobtc.auto_update")
+
+    # Invalidate cached responses so next request gets fresh data
+    try:
+        from backend.services.cache_service import invalidate_all
+        invalidate_all()
+    except Exception:
+        _log.debug("Cache invalidation failed after pipeline run", exc_info=True)
+
+    # Push event to connected WebSocket clients via thread-safe call
+    try:
+        import asyncio
+        from backend.routers.ws import broadcast
+
+        try:
+            loop = asyncio.get_running_loop()
+            asyncio.ensure_future(broadcast("data_updated", {"updated_at": finished_at}), loop=loop)
+        except RuntimeError:
+            # No running loop (sync thread) — use run_until_complete
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(broadcast("data_updated", {"updated_at": finished_at}))
+            finally:
+                loop.close()
+    except Exception:
+        _log.debug("WebSocket broadcast failed after pipeline run", exc_info=True)
+
+
 def run_update_pipeline() -> bool:
     global _ACTIVE_CHILD
 
@@ -301,6 +332,8 @@ def run_update_pipeline() -> bool:
                     "last_stage": "complete",
                 }
             )
+        # Notify connected WebSocket clients that data was refreshed
+        _notify_ws_clients(finished_at)
         return True
     finally:
         _release_process_lock(process_lock)

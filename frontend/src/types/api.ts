@@ -295,3 +295,57 @@ export interface UpdateStatus {
   log_path: string;
   status_path: string;
 }
+
+export interface BacktestTrade {
+  entry_date: string;
+  entry_price: number;
+  exit_date: string;
+  exit_price: number;
+  pnl_pct: number;
+  pnl_usd: number;
+  hold_days: number;
+  entry_score: number;
+  exit_score: number;
+}
+
+export interface BacktestEquityPoint {
+  date: string;
+  equity: number;
+  close: number;
+  score: number;
+  in_position: boolean;
+}
+
+export interface BacktestMonthly {
+  month: string;
+  return_pct: number;
+}
+
+export interface BacktestConfig {
+  buy_score_threshold: number;
+  sell_score_threshold: number;
+  hold_days: number;
+  initial_capital: number;
+  position_size: number;
+  use_direction: boolean;
+  sample_split: string;
+}
+
+export interface BacktestData {
+  config: BacktestConfig;
+  total_return_pct: number;
+  buy_hold_return_pct: number;
+  sharpe_ratio: number | null;
+  max_drawdown_pct: number;
+  win_rate: number;
+  total_trades: number;
+  avg_trade_pnl_pct: number;
+  avg_hold_days: number;
+  exposure_pct: number;
+  trades: BacktestTrade[];
+  equity_curve: BacktestEquityPoint[];
+  monthly_returns: BacktestMonthly[];
+  period_start: string;
+  period_end: string;
+  total_days: number;
+}

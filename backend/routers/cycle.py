@@ -9,6 +9,9 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException
 
 from backend.db import get_db, is_missing_relation
+from backend.services import cache_service
+
+CYCLE_CACHE_TTL = 3600  # 1 hour
 
 try:
     from research.cycle_projections import build_projections
@@ -171,6 +174,10 @@ def _build_signals(rows: list[dict]) -> list[dict]:
 
 @router.get("/cycle")
 def api_cycle():
+    cached = cache_service.get("cycle")
+    if cached is not None:
+        return cached
+
     try:
         with get_db() as conn:
             rows = conn.execute(
@@ -240,7 +247,7 @@ def api_cycle():
         for row in rows
     ]
 
-    return {
+    result = {
         "as_of": latest["date"],
         "price": _round_or_none(latest.get("price"), 2),
         "cycle_zone": latest.get("cycle_zone") or "neutral",
@@ -272,6 +279,8 @@ def api_cycle():
         "history": history,
         "projections": _build_projections_safe(),
     }
+    cache_service.set("cycle", result, ttl=CYCLE_CACHE_TTL)
+    return result
 
 
 def _build_projections_safe() -> dict | None:

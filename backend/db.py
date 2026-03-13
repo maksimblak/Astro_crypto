@@ -1,12 +1,16 @@
 """Database connection helper (DuckDB)."""
 
 import os
+import time
 from contextlib import contextmanager
 
 import duckdb
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "btc_research.duckdb")
+
+_READ_RETRIES = 3
+_READ_RETRY_DELAY = 1.0  # seconds
 
 
 class _DictCursor:
@@ -36,7 +40,18 @@ class _DictCursor:
 
 @contextmanager
 def get_db():
-    conn = duckdb.connect(DB_PATH, read_only=True)
+    """Open a read-only DuckDB connection with retries for write-lock conflicts."""
+    last_exc = None
+    for attempt in range(_READ_RETRIES):
+        try:
+            conn = duckdb.connect(DB_PATH, read_only=True)
+            break
+        except duckdb.IOException as exc:
+            last_exc = exc
+            if attempt < _READ_RETRIES - 1:
+                time.sleep(_READ_RETRY_DELAY)
+    else:
+        raise last_exc  # type: ignore[misc]
     try:
         yield _DictCursor(conn)
     finally:
@@ -49,6 +64,12 @@ def get_db_write():
     try:
         yield conn
         conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     finally:
         conn.close()
 

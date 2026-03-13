@@ -1,17 +1,14 @@
-"""Regime endpoint: /api/regime with TTL cache."""
+"""Regime endpoint: /api/regime with Redis/memory cache."""
 
-import threading
-
-from cachetools import TTLCache
 import duckdb
 from fastapi import APIRouter, HTTPException
 
 from backend.db import get_db, is_missing_relation
+from backend.services import cache_service
 
 router = APIRouter(tags=["regime"])
 
-_regime_cache: TTLCache = TTLCache(maxsize=1, ttl=300)
-_regime_lock = threading.Lock()
+REGIME_CACHE_TTL = 300  # 5 minutes
 
 _DESIRED_FEATURE_COLUMNS = [
     "amihud_illiquidity_20d", "amihud_z_90d", "range_compression_20d",
@@ -47,12 +44,11 @@ def _market_feature_select_sql(conn) -> str:
 
 @router.get("/regime")
 def api_regime():
-    with _regime_lock:
-        cached = _regime_cache.get("regime")
-        if cached is not None:
-            return cached
+    cached = cache_service.get("regime")
+    if cached is not None:
+        return cached
 
-    from market_regime import build_regime_payload
+    from backend.services.regime_service import build_regime_payload
 
     try:
         with get_db() as conn:
@@ -81,6 +77,5 @@ def api_regime():
         raise HTTPException(404, "No market data found in btc_daily.")
 
     result = build_regime_payload(rows)
-    with _regime_lock:
-        _regime_cache["regime"] = result
+    cache_service.set("regime", result, ttl=REGIME_CACHE_TTL)
     return result
