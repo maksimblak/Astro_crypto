@@ -201,6 +201,7 @@ export interface CycleData {
   metrics: CycleMetrics;
   signals: Signal[];
   history: CycleHistory[];
+  error?: string;
 }
 
 export interface UpdateStatus {

@@ -93,16 +93,20 @@ def _request_json(
     session: requests.Session,
     url: str,
     params: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
     max_retries: int = HTTP_MAX_RETRIES,
 ):
     last_exc: Exception | None = None
     for attempt in range(max_retries):
         try:
+            request_headers = {"User-Agent": HTTP_USER_AGENT}
+            if headers:
+                request_headers.update(headers)
             response = session.get(
                 url,
                 params=params,
                 timeout=HTTP_TIMEOUT,
-                headers={"User-Agent": HTTP_USER_AGENT},
+                headers=request_headers,
             )
             response.raise_for_status()
             return response.json()
@@ -116,6 +120,13 @@ def _request_json(
     if last_exc is not None:
         raise last_exc
     raise RuntimeError(f"Failed to fetch {url}")
+
+
+def _bgeometrics_headers() -> dict[str, str]:
+    token = os.getenv(BGEOMETRICS_TOKEN_ENV)
+    if not token:
+        return {}
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _extract_records(payload) -> list[dict]:
@@ -148,11 +159,12 @@ def _fetch_bgeometrics_series(
     end_date: str,
 ) -> pd.DataFrame:
     params = {"startday": start_date, "endday": end_date}
-    token = os.getenv(BGEOMETRICS_TOKEN_ENV)
-    if token:
-        params["token"] = token
-
-    payload = _request_json(session, f"{BGEOMETRICS_BASE_URL}{path}", params=params)
+    payload = _request_json(
+        session,
+        f"{BGEOMETRICS_BASE_URL}{path}",
+        params=params,
+        headers=_bgeometrics_headers(),
+    )
     rows = _extract_records(payload)
     if not rows:
         return pd.DataFrame(columns=["date", *value_keys.keys()])
@@ -178,10 +190,12 @@ def _fetch_remote_cycle_frames(start_date: str, end_date: str) -> list[pd.DataFr
             try:
                 if metric_name == "hashribbons":
                     params = {"startday": start_date, "endday": end_date}
-                    token = os.getenv(BGEOMETRICS_TOKEN_ENV)
-                    if token:
-                        params["token"] = token
-                    raw = _request_json(session, f"{BGEOMETRICS_BASE_URL}{path}", params=params)
+                    raw = _request_json(
+                        session,
+                        f"{BGEOMETRICS_BASE_URL}{path}",
+                        params=params,
+                        headers=_bgeometrics_headers(),
+                    )
                     raw_frame = pd.DataFrame(_extract_records(raw))
                     frame = pd.DataFrame(columns=["date", "hashrate_sma_30", "hashrate_sma_60", "hashribbon_trend"])
                     if not raw_frame.empty and "d" in raw_frame.columns:
@@ -198,7 +212,7 @@ def _fetch_remote_cycle_frames(start_date: str, end_date: str) -> list[pd.DataFr
                                 ),
                             }
                         )
-                    if not raw_frame.empty and "d" in raw_frame.columns and source_column in raw_frame:
+                    if not raw_frame.empty and "d" in raw_frame.columns and source_column in raw_frame.columns:
                         trend_frame = pd.DataFrame(
                             {
                                 "date": raw_frame["d"].astype(str),
@@ -221,21 +235,29 @@ def _fetch_remote_cycle_frames(start_date: str, end_date: str) -> list[pd.DataFr
     return frames
 
 
-def _load_existing_cycle_snapshot(start_date: str, end_date: str) -> pd.DataFrame:
+def _load_existing_cycle_snapshot(
+    start_date: str,
+    end_date: str,
+    conn: duckdb.DuckDBPyConnection | None = None,
+) -> pd.DataFrame:
     columns = ", ".join(["date", *PRESERVED_REMOTE_COLUMNS])
     query = (
         f"SELECT {columns} FROM btc_cycle_metrics WHERE date >= ? AND date <= ? ORDER BY date"
     )
+
+    owns_connection = conn is None
+    if conn is None:
+        try:
+            conn = duckdb.connect(DB_PATH, read_only=True)
+        except duckdb.Error:
+            return pd.DataFrame(columns=["date", *PRESERVED_REMOTE_COLUMNS])
     try:
-        conn = duckdb.connect(DB_PATH)
-    except duckdb.Error:
-        return pd.DataFrame(columns=["date", *PRESERVED_REMOTE_COLUMNS])
-    try:
-        df = pd.read_sql_query(query, conn, params=[start_date, end_date])
+        df = conn.execute(query, [start_date, end_date]).fetchdf()
     except Exception:
         return pd.DataFrame(columns=["date", *PRESERVED_REMOTE_COLUMNS])
     finally:
-        conn.close()
+        if owns_connection and conn is not None:
+            conn.close()
     return df
 
 
@@ -340,17 +362,15 @@ def _decay_scores(events: pd.Series, horizon_days: int) -> pd.Series:
 
 
 def _weighted_score(frame: pd.DataFrame, columns: list[tuple[str, float]]) -> pd.Series:
-    weights = pd.DataFrame(
-        {column: np.where(frame[column].notna(), weight, 0.0) for column, weight in columns},
-        index=frame.index,
-    )
     weighted_values = pd.DataFrame(
         {column: frame[column].fillna(0.0) * weight for column, weight in columns},
         index=frame.index,
     )
-    total_weight = weights.sum(axis=1)
     total_value = weighted_values.sum(axis=1)
-    return (total_value / total_weight.replace(0, np.nan)).fillna(0.0)
+    total_weight = sum(weight for _, weight in columns)
+    if total_weight <= 0:
+        return pd.Series(0.0, index=frame.index, dtype="float64")
+    return (total_value / total_weight).fillna(0.0)
 
 
 def _cycle_zone(top_score: float, bottom_score: float) -> str:
@@ -414,9 +434,18 @@ def _compute_cycle_scores(frame: pd.DataFrame) -> pd.DataFrame:
         default=0.30,
     )
 
+    price_sma10 = frame["price"].rolling(10, min_periods=10).mean()
+    price_sma20 = frame["price"].rolling(20, min_periods=20).mean()
+    price_confirm = (
+        frame["price"].gt(price_sma10)
+        & price_sma10.gt(price_sma20)
+        & frame["price"].pct_change(10).gt(0)
+    )
+    hashribbon_trend_up = frame["hashrate_sma_30"] > frame["hashrate_sma_60"]
+    hashribbon_setup = hashribbon_trend_up & price_confirm
     frame["hashribbon_buy_signal"] = (
-        (frame["hashrate_sma_30"] > frame["hashrate_sma_60"])
-        & (frame["hashrate_sma_30"].shift(1) <= frame["hashrate_sma_60"].shift(1))
+        hashribbon_setup
+        & ~hashribbon_setup.shift(1).fillna(False)
     ).astype("int64")
     frame["hashribbon_sell_signal"] = (
         (frame["hashrate_sma_30"] < frame["hashrate_sma_60"])
@@ -504,7 +533,10 @@ def init_cycle_metrics_table(conn: duckdb.DuckDBPyConnection):
     conn.commit()
 
 
-def build_cycle_metrics(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
+def build_cycle_metrics(
+    df_ohlcv: pd.DataFrame,
+    conn: duckdb.DuckDBPyConnection | None = None,
+) -> pd.DataFrame:
     df = _normalize_ohlcv(df_ohlcv)
     close = pd.to_numeric(df["close"], errors="coerce")
 
@@ -521,7 +553,7 @@ def build_cycle_metrics(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
     for frame in _fetch_remote_cycle_frames(start_date, end_date):
         remote_base = remote_base.merge(frame.reset_index(drop=True), on="date", how="left")
 
-    existing_snapshot = _load_existing_cycle_snapshot(start_date, end_date)
+    existing_snapshot = _load_existing_cycle_snapshot(start_date, end_date, conn=conn)
     if not existing_snapshot.empty:
         remote_base = remote_base.merge(existing_snapshot, on="date", how="left", suffixes=("", "_stored"))
         for column in PRESERVED_REMOTE_COLUMNS:

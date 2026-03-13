@@ -441,7 +441,7 @@ def main():
 
     # 3c. Macro cycle layer for global top/bottom monitoring
     try:
-        cycle_metrics_df = build_cycle_metrics(df_ohlcv)
+        cycle_metrics_df = build_cycle_metrics(df_ohlcv, conn=conn)
         save_cycle_metrics_to_db(conn, cycle_metrics_df)
     except Exception as exc:  # pragma: no cover - defensive pipeline guard
         logger.warning("Не удалось обновить btc_cycle_metrics: %s", exc)

@@ -5,7 +5,8 @@ import SignalCard from '../regime/SignalCard';
 import CycleChart from './CycleChart';
 
 interface Props {
-  data: CycleData;
+  data?: CycleData;
+  error?: string;
 }
 
 function zoneLabel(zone: string): string {
@@ -35,7 +36,25 @@ function flaggedRows(history: CycleHistory[]): CycleHistory[] {
     .reverse();
 }
 
-export default function CycleSection({ data }: Props) {
+export default function CycleSection({ data, error }: Props) {
+  if (error || !data) {
+    return (
+      <div className="section" id="sectionCycle">
+        <div className="section-head">
+          <div className="section-title">
+            <span className="dot" style={{ background: 'var(--bear)', boxShadow: 'var(--glow-red)' }} />
+            Пики и дно BTC
+          </div>
+        </div>
+        <div className="card">
+          <div className="loading" style={{ animation: 'none' }}>
+            {error || 'Macro cycle layer недоступен.'}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const tone = zoneTone(data.cycle_zone);
   const toneClass = stressTone(tone);
   const flagged = flaggedRows(data.history || []);

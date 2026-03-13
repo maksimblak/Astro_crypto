@@ -34,7 +34,12 @@ export default function App() {
             {today.data && <HeroSection data={today.data} scoreScale={scoreScale} />}
             {calendar.data && <CalendarSection data={calendar.data} scoreScale={scoreScale} />}
             {daily.data && pivots.data && <PriceChart daily={daily.data} pivots={pivots.data} />}
-            {cycle.data && <CycleSection data={cycle.data} />}
+            {!cycle.isLoading && (
+              <CycleSection
+                data={cycle.data}
+                error={cycle.error instanceof Error ? cycle.error.message : undefined}
+              />
+            )}
             {regime.data && <RegimeSection data={regime.data} />}
             {calendar.data && (
               <RiskSection
