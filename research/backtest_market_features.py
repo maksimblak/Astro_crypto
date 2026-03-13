@@ -19,9 +19,17 @@ FEATURES = [
     ("wiki_views_z_30d", "Attention", "higher = more attention"),
     ("fear_greed_value", "Attention", "higher = greedier crowd"),
     ("funding_rate_z_30d", "Derivatives", "higher = more crowded longs"),
+    ("funding_price_divergence_3d", "Derivatives", "positive = price/funding disagreement, negative = crowded alignment"),
     ("perp_premium_daily", "Derivatives", "higher = richer perp premium"),
     ("perp_premium_z_30d", "Derivatives", "higher = richer perp premium vs baseline"),
+    ("open_interest_delta_1d", "Derivatives", "higher = faster daily OI expansion"),
+    ("open_interest_delta_z_30d", "Derivatives", "higher = unusual OI expansion vs 30d baseline"),
     ("open_interest_z_30d", "Derivatives", "higher = more crowded OI"),
+    ("dxy_return_20d", "Macro", "higher = stronger dollar headwind"),
+    ("dxy_return_z_90d", "Macro", "higher = unusual DXY momentum"),
+    ("us10y_change_20d_bps", "Macro", "higher = faster rise in 10Y yield"),
+    ("us10y_change_z_90d", "Macro", "higher = unusual rates shock"),
+    ("btc_spx_corr_30d", "Macro", "higher = macro more likely to dominate BTC tape"),
     ("unique_addresses_z_30d", "On-chain", "higher = more active network"),
     ("tx_count_z_30d", "On-chain", "higher = more transactions"),
     ("onchain_activity_z_30d", "On-chain", "higher = stronger on-chain composite"),
@@ -45,9 +53,17 @@ def load_feature_frame() -> pd.DataFrame:
                 f.wiki_views_z_30d,
                 f.fear_greed_value,
                 f.funding_rate_z_30d,
+                f.funding_price_divergence_3d,
                 f.perp_premium_daily,
                 f.perp_premium_z_30d,
+                f.open_interest_delta_1d,
+                f.open_interest_delta_z_30d,
                 f.open_interest_z_30d,
+                f.dxy_return_20d,
+                f.dxy_return_z_90d,
+                f.us10y_change_20d_bps,
+                f.us10y_change_z_90d,
+                f.btc_spx_corr_30d,
                 f.unique_addresses_z_30d,
                 f.tx_count_z_30d,
                 f.onchain_activity_z_30d
@@ -77,6 +93,9 @@ def build_context_score(df: pd.DataFrame) -> pd.Series:
             "wiki_views_z_30d",
             "perp_premium_daily",
             "open_interest_z_30d",
+            "funding_price_divergence_3d",
+            "dxy_return_z_90d",
+            "us10y_change_z_90d",
         ]
     ].notna().any(axis=1)
 
@@ -99,6 +118,18 @@ def build_context_score(df: pd.DataFrame) -> pd.Series:
     oi = df["open_interest_z_30d"]
     score = score.where(~(oi <= -1.48), score + 1)
     score = score.where(~(oi >= 0.42), score - 1)
+
+    funding_div = df["funding_price_divergence_3d"]
+    score = score.where(~(funding_div >= 1.0), score + 2)
+    score = score.where(~(funding_div <= -1.0), score - 1)
+
+    dxy = df["dxy_return_z_90d"]
+    score = score.where(~(dxy <= -0.75), score + 1)
+    score = score.where(~(dxy >= 0.75), score - 2)
+
+    rates = df["us10y_change_z_90d"]
+    score = score.where(~(rates <= -0.75), score + 1)
+    score = score.where(~(rates >= 0.75), score - 1)
 
     score = score.where(available_mask, other=pd.NA)
     return score
@@ -250,7 +281,7 @@ def main():
         df,
         CONTEXT_SCORE_NAME,
         "Bundle",
-        "weighted context score from fear & greed, active addresses, wikipedia attention, perp premium and open interest",
+        "weighted context score from crypto-native signals plus macro overlays (DXY, rates, funding divergence)",
     )
     summary_rows.append(context_summary)
     detail_rows.extend(context_details)

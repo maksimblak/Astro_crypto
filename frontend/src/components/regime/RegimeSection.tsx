@@ -13,6 +13,11 @@ export default function RegimeSection({ data }: Props) {
   const stressChipTone = stressTone(data.stress_tone);
   const contextChipTone = stressTone(data.context_tone);
   const setupTone = stressTone(data.setup_tone);
+  const oiStateLabel = data.metrics?.oi_price_state_1d === 'long_build' ? 'Long build'
+    : data.metrics?.oi_price_state_1d === 'short_build' ? 'Short build'
+    : data.metrics?.oi_price_state_1d === 'short_cover' ? 'Short cover'
+    : data.metrics?.oi_price_state_1d === 'long_unwind' ? 'Long unwind'
+    : '\u2014';
   const biasLabel = data.bias === 'risk-on' ? 'Risk-on'
     : data.bias === 'risk-off' ? 'Risk-off'
     : 'Нейтрально';
@@ -32,8 +37,17 @@ export default function RegimeSection({ data }: Props) {
     { label: 'Wikipedia z', value: `${m.wiki_views_z_30d ?? '\u2014'}`, sub: 'Внешнее внимание к BTC vs 30д baseline' },
     { label: 'Fear & Greed', value: `${m.fear_greed_value ?? '\u2014'}`, sub: 'Сантимент толпы по шкале 0-100' },
     { label: 'Funding z', value: `${m.funding_rate_z_30d ?? '\u2014'}`, sub: 'Watchlist only: в context score пока не входит' },
+    { label: 'Funding divergence 3д', value: `${m.funding_price_divergence_3d ?? '\u2014'}`, sub: 'Положительное = price и funding расходятся' },
     { label: 'Perp premium', value: `${m.perp_premium_daily ?? '\u2014'}%`, sub: 'Премия perpetual к spot/index' },
+    { label: 'OI delta 1д', value: `${m.open_interest_delta_1d ?? '\u2014'}%`, sub: 'Дневное изменение открытого интереса' },
+    { label: 'OI delta z', value: `${m.open_interest_delta_z_30d ?? '\u2014'}`, sub: 'Насколько необычно текущее изменение OI' },
+    { label: 'OI state', value: oiStateLabel, sub: 'Long build / short build / unwind / cover' },
     { label: 'OI z', value: `${m.open_interest_z_30d ?? '\u2014'}`, sub: 'Насколько раздут открытый интерес' },
+    { label: 'DXY 20д', value: `${m.dxy_return_20d ?? '\u2014'}%`, sub: 'Сильный рост доллара = macro headwind' },
+    { label: 'DXY z', value: `${m.dxy_return_z_90d ?? '\u2014'}`, sub: 'Насколько необычен импульс доллара' },
+    { label: 'US10Y 20д', value: `${m.us10y_change_20d_bps ?? '\u2014'} bps`, sub: 'Изменение доходности 10-леток за 20 дней' },
+    { label: 'US10Y z', value: `${m.us10y_change_z_90d ?? '\u2014'}`, sub: 'Насколько необычен rates shock' },
+    { label: 'BTC/SPX corr', value: `${m.btc_spx_corr_30d ?? '\u2014'}`, sub: 'Высокая корреляция = macro доминирует' },
     { label: 'Active addr z', value: `${m.unique_addresses_z_30d ?? '\u2014'}`, sub: 'Сильнейший on-chain сигнал по backtest' },
   ];
 

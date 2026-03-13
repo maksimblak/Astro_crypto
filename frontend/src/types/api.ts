@@ -94,8 +94,21 @@ export interface RegimeMetrics {
   wiki_views_z_30d?: number;
   fear_greed_value?: number;
   funding_rate_z_30d?: number;
+  funding_price_divergence_3d?: number;
+  funding_contrarian_bias_3d?: number;
   perp_premium_daily?: number;
+  open_interest_delta_1d?: number;
+  open_interest_delta_z_30d?: number;
+  oi_price_state_1d?: string;
   open_interest_z_30d?: number;
+  dxy_close?: number;
+  dxy_return_20d?: number;
+  dxy_return_z_90d?: number;
+  us10y_yield?: number;
+  us10y_change_20d_bps?: number;
+  us10y_change_z_90d?: number;
+  spx_close?: number;
+  btc_spx_corr_30d?: number;
   unique_addresses_z_30d?: number;
 }
 
@@ -110,6 +123,9 @@ export interface RegimeHistory {
   confidence: number;
   stress_label: string;
   context_label: string;
+  funding_price_divergence_3d?: number;
+  open_interest_delta_1d?: number;
+  btc_spx_corr_30d?: number;
 }
 
 export interface RegimeData {

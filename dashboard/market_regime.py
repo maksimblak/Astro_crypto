@@ -31,12 +31,21 @@ FEAR_GREED_GREEDY = 70           # Greed territory
 FEAR_GREED_FEARFUL = 24          # Fear territory
 FUNDING_Z_HIGH = 0.98            # High funding rate z
 FUNDING_Z_LOW = -1.12            # Low funding rate z
+FUNDING_DIVERGENCE_MILD = 0.60   # Moderate disagreement between price and funding
+FUNDING_DIVERGENCE_STRONG = 1.20 # Strong disagreement between price and funding
 PERP_PREMIUM_HIGH = 0.00019      # Perp premium bullish
 PERP_PREMIUM_LOW = -0.00026      # Perp premium bearish
 OI_Z_LOW = -1.48                 # Low OI (contrarian bull)
 OI_Z_HIGH = 0.42                 # High OI (crowding risk)
+OI_DELTA_Z_ELEVATED = 0.75       # Elevated OI expansion/contraction
 ADDRESSES_Z_HIGH = 0.91          # High on-chain activity
 ADDRESSES_Z_LOW = -0.90          # Low on-chain activity
+DXY_RETURN_ELEVATED = 0.03       # Rising dollar becomes a macro headwind
+DXY_RETURN_HIGH = 0.05           # Strong DXY squeeze
+US10Y_CHANGE_ELEVATED_BPS = 25.0 # Rates moving higher is risk-off
+US10Y_CHANGE_HIGH_BPS = 50.0     # Sharp rates shock
+BTC_SPX_CORR_HIGH = 0.55         # Macro dominates when BTC/SPX correlation is high
+BTC_SPX_CORR_LOW = 0.20          # BTC tape is more idiosyncratic when correlation is low
 
 # --- Regime classification thresholds ---
 REGIME_STRONG_BULL = 10          # Direction score for strong bull
@@ -79,6 +88,12 @@ def _fmt_ratio(value, digits=2):
     return f"{value:.{digits}f}x"
 
 
+def _fmt_bps(value, digits=0):
+    if value is None:
+        return "—"
+    return f"{value:.{digits}f} bps"
+
+
 def _fmt_float(value, digits=2):
     if value is None:
         return "—"
@@ -95,6 +110,18 @@ def _fmt_count(value):
     if value is None:
         return "—"
     return f"{value:,.0f}"
+
+
+def _fmt_state(value):
+    if value is None:
+        return "—"
+    labels = {
+        "long_build": "Long build",
+        "short_build": "Short build",
+        "short_cover": "Short cover",
+        "long_unwind": "Long unwind",
+    }
+    return labels.get(value, str(value))
 
 
 def _take(values, end_idx, window):
@@ -519,6 +546,26 @@ def _build_stress_signals(metrics):
     mom20 = metrics["momentum_20"]
     momentum_points = 1 if mom20 is not None and mom20 <= -MOMENTUM_20_STRONG else 0
 
+    dxy_return = metrics["dxy_return_20d"]
+    if dxy_return is None:
+        dxy_points = 0
+    elif dxy_return >= DXY_RETURN_HIGH:
+        dxy_points = 2
+    elif dxy_return >= DXY_RETURN_ELEVATED:
+        dxy_points = 1
+    else:
+        dxy_points = 0
+
+    us10y_change = metrics["us10y_change_20d_bps"]
+    if us10y_change is None:
+        us10y_points = 0
+    elif us10y_change >= US10Y_CHANGE_HIGH_BPS:
+        us10y_points = 2
+    elif us10y_change >= US10Y_CHANGE_ELEVATED_BPS:
+        us10y_points = 1
+    else:
+        us10y_points = 0
+
     return [
         _stress_signal(
             "Amihud illiquidity (z)",
@@ -554,6 +601,20 @@ def _build_stress_signals(metrics):
             "Резкий короткий спад добавляет stress, но не должен доминировать над 90-дневным трендом.",
             momentum_points,
             mom20 is not None,
+        ),
+        _stress_signal(
+            "DXY momentum 20д",
+            _fmt_pct(dxy_return),
+            "Быстрый рост доллара часто давит на BTC и делает macro headwind самостоятельным stress-фактором.",
+            dxy_points,
+            dxy_return is not None,
+        ),
+        _stress_signal(
+            "US10Y change 20д",
+            _fmt_bps(us10y_change),
+            "Резкий рост доходностей усиливает risk-off режим и ухудшает переносимость leverage-историй.",
+            us10y_points,
+            us10y_change is not None,
         ),
     ]
 
@@ -619,6 +680,35 @@ def _build_context_signals(metrics):
     else:
         addresses_score = 0
 
+    funding_divergence = metrics["funding_price_divergence_3d"]
+    funding_bias = metrics["funding_contrarian_bias_3d"]
+    if funding_divergence is None or funding_bias is None or funding_bias == 0:
+        funding_divergence_score = 0
+    elif funding_bias > 0 and funding_divergence >= FUNDING_DIVERGENCE_STRONG:
+        funding_divergence_score = 2
+    elif funding_bias > 0 and funding_divergence >= FUNDING_DIVERGENCE_MILD:
+        funding_divergence_score = 1
+    elif funding_bias < 0 and funding_divergence >= FUNDING_DIVERGENCE_STRONG:
+        funding_divergence_score = -2
+    elif funding_bias < 0 and funding_divergence >= FUNDING_DIVERGENCE_MILD:
+        funding_divergence_score = -1
+    else:
+        funding_divergence_score = 0
+
+    oi_state = metrics["oi_price_state_1d"]
+    oi_delta_z = metrics["open_interest_delta_z_30d"]
+    oi_state_score = 0
+    if oi_state == "short_build":
+        oi_state_score = -1
+    elif oi_state == "long_unwind":
+        oi_state_score = -1
+    elif oi_state == "short_cover":
+        oi_state_score = 1
+    elif oi_state == "long_build":
+        oi_state_score = 1 if oi_delta_z is None or oi_delta_z <= OI_DELTA_Z_ELEVATED else 0
+
+    btc_spx_corr = metrics["btc_spx_corr_30d"]
+
     return [
         _context_signal(
             "Wikipedia attention",
@@ -645,6 +735,14 @@ def _build_context_signals(metrics):
             available=funding_z is not None,
         ),
         _context_signal(
+            "Funding divergence 3д",
+            _fmt_float(funding_divergence),
+            "Положительное значение значит, что price и funding расходятся: рост при отрицательном funding поддерживает contrarian-bull тезис, падение при положительном funding усиливает bearish чтение.",
+            _signal_tone(funding_divergence_score),
+            score=funding_divergence_score,
+            available=funding_divergence is not None,
+        ),
+        _context_signal(
             "Perp premium",
             _fmt_pct(perp_premium, 2),
             "Дневная премия perpetual к индексу оказалась заметно сильнее z-score версии, поэтому в score используется именно она.",
@@ -661,12 +759,28 @@ def _build_context_signals(metrics):
             available=oi_z is not None,
         ),
         _context_signal(
+            "OI build state",
+            _fmt_state(oi_state),
+            "Рост OI вместе с направлением цены показывает, кто строит позицию: short build и long unwind чаще портят tape, short cover и умеренный long build помогают.",
+            _signal_tone(oi_state_score),
+            score=oi_state_score,
+            available=oi_state is not None,
+        ),
+        _context_signal(
             "Active addresses",
             _fmt_float(active_addresses_z),
             "Composite on-chain score убран из context score: в backtest лучше работал именно z-score по unique addresses.",
             _signal_tone(addresses_score),
             score=addresses_score,
             available=active_addresses_z is not None,
+        ),
+        _context_signal(
+            "BTC/SPX corr 30д",
+            _fmt_float(btc_spx_corr),
+            "Высокая корреляция значит, что macro сейчас доминирует над crypto-native tape. Низкая корреляция даёт больше веса внутренним BTC-сигналам.",
+            "neutral",
+            score=0,
+            available=btc_spx_corr is not None,
         ),
     ]
 
@@ -775,10 +889,23 @@ def calculate_regime_history(rows):
             "fear_greed_z_30d": _row_value(row, "fear_greed_z_30d"),
             "funding_rate_daily": _row_value(row, "funding_rate_daily"),
             "funding_rate_z_30d": _row_value(row, "funding_rate_z_30d"),
+            "funding_price_divergence_3d": _row_value(row, "funding_price_divergence_3d"),
+            "funding_contrarian_bias_3d": _row_value(row, "funding_contrarian_bias_3d"),
             "perp_premium_daily": _row_value(row, "perp_premium_daily"),
             "perp_premium_z_30d": _row_value(row, "perp_premium_z_30d"),
             "open_interest_value": _row_value(row, "open_interest_value"),
+            "open_interest_delta_1d": _row_value(row, "open_interest_delta_1d"),
+            "open_interest_delta_z_30d": _row_value(row, "open_interest_delta_z_30d"),
+            "oi_price_state_1d": _row_value(row, "oi_price_state_1d"),
             "open_interest_z_30d": _row_value(row, "open_interest_z_30d"),
+            "dxy_close": _row_value(row, "dxy_close"),
+            "dxy_return_20d": _row_value(row, "dxy_return_20d"),
+            "dxy_return_z_90d": _row_value(row, "dxy_return_z_90d"),
+            "us10y_yield": _row_value(row, "us10y_yield"),
+            "us10y_change_20d_bps": _row_value(row, "us10y_change_20d_bps"),
+            "us10y_change_z_90d": _row_value(row, "us10y_change_z_90d"),
+            "spx_close": _row_value(row, "spx_close"),
+            "btc_spx_corr_30d": _row_value(row, "btc_spx_corr_30d"),
             "unique_addresses": _row_value(row, "unique_addresses"),
             "unique_addresses_z_30d": _row_value(row, "unique_addresses_z_30d"),
             "tx_count": _row_value(row, "tx_count"),
@@ -828,9 +955,22 @@ def calculate_regime_history(rows):
                 "wiki_views_z_30d": round(metrics["wiki_views_z_30d"], 2) if metrics["wiki_views_z_30d"] is not None else None,
                 "fear_greed_value": round(metrics["fear_greed_value"], 1) if metrics["fear_greed_value"] is not None else None,
                 "funding_rate_z_30d": round(metrics["funding_rate_z_30d"], 2) if metrics["funding_rate_z_30d"] is not None else None,
+                "funding_price_divergence_3d": round(metrics["funding_price_divergence_3d"], 2) if metrics["funding_price_divergence_3d"] is not None else None,
+                "funding_contrarian_bias_3d": int(metrics["funding_contrarian_bias_3d"]) if metrics["funding_contrarian_bias_3d"] is not None else None,
                 "perp_premium_daily": round(metrics["perp_premium_daily"] * 100, 3) if metrics["perp_premium_daily"] is not None else None,
                 "perp_premium_z_30d": round(metrics["perp_premium_z_30d"], 2) if metrics["perp_premium_z_30d"] is not None else None,
+                "open_interest_delta_1d": round(metrics["open_interest_delta_1d"] * 100, 2) if metrics["open_interest_delta_1d"] is not None else None,
+                "open_interest_delta_z_30d": round(metrics["open_interest_delta_z_30d"], 2) if metrics["open_interest_delta_z_30d"] is not None else None,
+                "oi_price_state_1d": metrics["oi_price_state_1d"],
                 "open_interest_z_30d": round(metrics["open_interest_z_30d"], 2) if metrics["open_interest_z_30d"] is not None else None,
+                "dxy_close": round(metrics["dxy_close"], 2) if metrics["dxy_close"] is not None else None,
+                "dxy_return_20d": round(metrics["dxy_return_20d"] * 100, 2) if metrics["dxy_return_20d"] is not None else None,
+                "dxy_return_z_90d": round(metrics["dxy_return_z_90d"], 2) if metrics["dxy_return_z_90d"] is not None else None,
+                "us10y_yield": round(metrics["us10y_yield"], 2) if metrics["us10y_yield"] is not None else None,
+                "us10y_change_20d_bps": round(metrics["us10y_change_20d_bps"], 1) if metrics["us10y_change_20d_bps"] is not None else None,
+                "us10y_change_z_90d": round(metrics["us10y_change_z_90d"], 2) if metrics["us10y_change_z_90d"] is not None else None,
+                "spx_close": round(metrics["spx_close"], 2) if metrics["spx_close"] is not None else None,
+                "btc_spx_corr_30d": round(metrics["btc_spx_corr_30d"], 2) if metrics["btc_spx_corr_30d"] is not None else None,
                 "unique_addresses_z_30d": round(metrics["unique_addresses_z_30d"], 2) if metrics["unique_addresses_z_30d"] is not None else None,
                 "onchain_activity_z_30d": round(metrics["onchain_activity_z_30d"], 2) if metrics["onchain_activity_z_30d"] is not None else None,
             }
@@ -920,9 +1060,22 @@ def build_regime_payload(rows):
             "wiki_views_z_30d": latest_point["wiki_views_z_30d"],
             "fear_greed_value": latest_point["fear_greed_value"],
             "funding_rate_z_30d": latest_point["funding_rate_z_30d"],
+            "funding_price_divergence_3d": latest_point["funding_price_divergence_3d"],
+            "funding_contrarian_bias_3d": latest_point["funding_contrarian_bias_3d"],
             "perp_premium_daily": latest_point["perp_premium_daily"],
             "perp_premium_z_30d": latest_point["perp_premium_z_30d"],
+            "open_interest_delta_1d": latest_point["open_interest_delta_1d"],
+            "open_interest_delta_z_30d": latest_point["open_interest_delta_z_30d"],
+            "oi_price_state_1d": latest_point["oi_price_state_1d"],
             "open_interest_z_30d": latest_point["open_interest_z_30d"],
+            "dxy_close": latest_point["dxy_close"],
+            "dxy_return_20d": latest_point["dxy_return_20d"],
+            "dxy_return_z_90d": latest_point["dxy_return_z_90d"],
+            "us10y_yield": latest_point["us10y_yield"],
+            "us10y_change_20d_bps": latest_point["us10y_change_20d_bps"],
+            "us10y_change_z_90d": latest_point["us10y_change_z_90d"],
+            "spx_close": latest_point["spx_close"],
+            "btc_spx_corr_30d": latest_point["btc_spx_corr_30d"],
             "unique_addresses_z_30d": latest_point["unique_addresses_z_30d"],
             "onchain_activity_z_30d": latest_point["onchain_activity_z_30d"],
         },

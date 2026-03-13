@@ -9,16 +9,17 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 import requests
+import yfinance as yf
 
 try:
-    from .config import DB_PATH
+    from .config import DB_PATH, yfinance_exclusive_end
     from .derivatives_history import (
         aggregate_derivatives_history,
         fetch_derivatives_history,
         save_derivatives_history_to_db,
     )
 except ImportError:
-    from config import DB_PATH
+    from config import DB_PATH, yfinance_exclusive_end
     from derivatives_history import (
         aggregate_derivatives_history,
         fetch_derivatives_history,
@@ -26,7 +27,7 @@ except ImportError:
     )
 
 
-FEATURE_SOURCE_VERSION = "market_features_v3"
+FEATURE_SOURCE_VERSION = "market_features_v4"
 HTTP_TIMEOUT = 30
 HTTP_HEADERS = {
     "User-Agent": "AstroBTC/1.0 (market feature pipeline)",
@@ -36,7 +37,15 @@ PRESERVED_RAW_FEATURE_COLUMNS = [
     "fear_greed_value",
     "unique_addresses",
     "tx_count",
+    "dxy_close",
+    "us10y_yield",
+    "spx_close",
 ]
+YFINANCE_TICKERS = {
+    "dxy_close": "DX-Y.NYB",
+    "us10y_yield": "^TNX",
+    "spx_close": "^GSPC",
+}
 MARKET_FEATURE_COLUMNS = {
     "date": "TEXT PRIMARY KEY",
     "dollar_volume": "REAL",
@@ -58,14 +67,27 @@ MARKET_FEATURE_COLUMNS = {
     "perp_premium_z_30d": "REAL",
     "perp_premium_source_count": "INTEGER",
     "open_interest_value": "REAL",
+    "open_interest_delta_1d": "REAL",
+    "open_interest_delta_z_30d": "REAL",
+    "oi_price_state_1d": "TEXT",
     "open_interest_z_30d": "REAL",
     "open_interest_source_count": "INTEGER",
     "open_interest_primary_source": "TEXT",
+    "funding_price_divergence_3d": "REAL",
+    "funding_contrarian_bias_3d": "INTEGER",
     "unique_addresses": "REAL",
     "unique_addresses_z_30d": "REAL",
     "tx_count": "REAL",
     "tx_count_z_30d": "REAL",
     "onchain_activity_z_30d": "REAL",
+    "dxy_close": "REAL",
+    "dxy_return_20d": "REAL",
+    "dxy_return_z_90d": "REAL",
+    "us10y_yield": "REAL",
+    "us10y_change_20d_bps": "REAL",
+    "us10y_change_z_90d": "REAL",
+    "spx_close": "REAL",
+    "btc_spx_corr_30d": "REAL",
     "derivatives_source_version": "TEXT",
     "feature_source_version": "TEXT",
 }
@@ -114,8 +136,9 @@ def _empty_frame() -> pd.DataFrame:
 
 
 def _load_existing_feature_snapshot(start_date: str, end_date: str) -> pd.DataFrame:
+    select_columns = ", ".join(PRESERVED_RAW_FEATURE_COLUMNS)
     query = (
-        "SELECT date, wiki_views, fear_greed_value, unique_addresses, tx_count "
+        f"SELECT date, {select_columns} "
         "FROM btc_market_features WHERE date >= ? AND date <= ? ORDER BY date"
     )
     conn = duckdb.connect(DB_PATH)
@@ -206,6 +229,114 @@ def _fetch_blockchain_chart(session: requests.Session, chart_name: str, value_co
     return pd.DataFrame(rows).sort_values("date").drop_duplicates("date", keep="last")
 
 
+def _download_yfinance_close(ticker: str, start_date: str, end_date: str) -> pd.Series:
+    end_exclusive = yfinance_exclusive_end(pd.Timestamp(end_date).date())
+    df = yf.download(ticker, start=start_date, end=end_exclusive, progress=False, auto_adjust=False)
+    if df.empty:
+        return pd.Series(dtype="float64")
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    close_column = "Adj Close" if "Adj Close" in df.columns else "Close"
+    series = df[close_column].astype(float)
+    index = pd.to_datetime(series.index)
+    if getattr(index, "tz", None) is not None:
+        index = index.tz_localize(None)
+    series.index = index
+    return series.sort_index()
+
+
+def _normalize_us10y_series(series: pd.Series) -> pd.Series:
+    cleaned = series.astype(float)
+    median_value = cleaned.dropna().median()
+    if pd.notna(median_value) and median_value > 20:
+        cleaned = cleaned / 10.0
+    return cleaned
+
+
+def _frame_from_series(series: pd.Series, value_column: str) -> pd.DataFrame:
+    if series.empty:
+        return _empty_frame()
+    frame = pd.DataFrame(
+        {
+            "date": pd.to_datetime(series.index).strftime("%Y-%m-%d"),
+            value_column: series.to_numpy(),
+        }
+    )
+    return frame.sort_values("date").drop_duplicates("date", keep="last")
+
+
+def _fetch_macro_frames(start_date: str, end_date: str) -> list[pd.DataFrame]:
+    frames = []
+    try:
+        dxy_close = _download_yfinance_close(YFINANCE_TICKERS["dxy_close"], start_date, end_date)
+        if not dxy_close.empty:
+            dxy_return_20d = dxy_close.pct_change(20)
+            frames.append(
+                pd.DataFrame(
+                    {
+                        "date": pd.to_datetime(dxy_close.index).strftime("%Y-%m-%d"),
+                        "dxy_close": dxy_close.to_numpy(),
+                        "dxy_return_20d": dxy_return_20d.to_numpy(),
+                        "dxy_return_z_90d": _rolling_z(dxy_return_20d, 90, 30).to_numpy(),
+                    }
+                ).sort_values("date")
+            )
+    except Exception as exc:  # pragma: no cover - network best effort
+        print(f"[market_features] dxy unavailable: {exc}")
+
+    try:
+        us10y_yield = _normalize_us10y_series(
+            _download_yfinance_close(YFINANCE_TICKERS["us10y_yield"], start_date, end_date)
+        )
+        if not us10y_yield.empty:
+            us10y_change_20d_bps = (us10y_yield - us10y_yield.shift(20)) * 100.0
+            frames.append(
+                pd.DataFrame(
+                    {
+                        "date": pd.to_datetime(us10y_yield.index).strftime("%Y-%m-%d"),
+                        "us10y_yield": us10y_yield.to_numpy(),
+                        "us10y_change_20d_bps": us10y_change_20d_bps.to_numpy(),
+                        "us10y_change_z_90d": _rolling_z(us10y_change_20d_bps, 90, 30).to_numpy(),
+                    }
+                ).sort_values("date")
+            )
+    except Exception as exc:  # pragma: no cover - network best effort
+        print(f"[market_features] us10y unavailable: {exc}")
+
+    try:
+        spx_close = _download_yfinance_close(YFINANCE_TICKERS["spx_close"], start_date, end_date)
+        frame = _frame_from_series(spx_close, "spx_close")
+        if not frame.empty:
+            frames.append(frame)
+    except Exception as exc:  # pragma: no cover - network best effort
+        print(f"[market_features] spx unavailable: {exc}")
+
+    return frames
+
+
+def _compute_btc_spx_corr_frame(
+    dates: pd.Series,
+    btc_close: pd.Series,
+    spx_close: pd.Series,
+) -> pd.DataFrame:
+    overlap = pd.DataFrame(
+        {
+            "date": dates.astype(str),
+            "btc_close": btc_close.astype(float).to_numpy(),
+            "spx_close": pd.to_numeric(spx_close, errors="coerce").to_numpy(),
+        }
+    ).dropna(subset=["spx_close"])
+    if overlap.empty:
+        return _empty_frame()
+
+    overlap["btc_return_1d"] = overlap["btc_close"].pct_change()
+    overlap["spx_return_1d"] = overlap["spx_close"].pct_change()
+    overlap["btc_spx_corr_30d"] = overlap["btc_return_1d"].rolling(30, min_periods=15).corr(
+        overlap["spx_return_1d"]
+    )
+    return overlap[["date", "btc_spx_corr_30d"]]
+
+
 def fetch_non_derivative_frames(start_date: str, end_date: str) -> list[pd.DataFrame]:
     frames = []
     with requests.Session() as session:
@@ -223,7 +354,12 @@ def fetch_non_derivative_frames(start_date: str, end_date: str) -> list[pd.DataF
                     frames.append(frame)
             except Exception as exc:  # pragma: no cover - network best effort
                 print(f"[market_features] {name} unavailable: {exc}")
+    frames.extend(fetch_macro_frames(start_date, end_date))
     return frames
+
+
+def fetch_macro_frames(start_date: str, end_date: str) -> list[pd.DataFrame]:
+    return _fetch_macro_frames(start_date, end_date)
 
 
 def init_market_features_table(conn: duckdb.DuckDBPyConnection):
@@ -321,6 +457,10 @@ def build_market_features(df_ohlcv: pd.DataFrame) -> tuple[pd.DataFrame, pd.Data
         base_dates = base_dates.merge(derivatives_features_df, on="date", how="left")
 
     features = features.merge(base_dates, on="date", how="left")
+    if "spx_close" in features.columns:
+        spx_corr_frame = _compute_btc_spx_corr_frame(features["date"], close.reset_index(drop=True), features["spx_close"])
+        if not spx_corr_frame.empty:
+            features = features.merge(spx_corr_frame, on="date", how="left")
 
     raw_ffill_columns = [
         "wiki_views",
@@ -330,6 +470,14 @@ def build_market_features(df_ohlcv: pd.DataFrame) -> tuple[pd.DataFrame, pd.Data
         "open_interest_value",
         "unique_addresses",
         "tx_count",
+        "dxy_close",
+        "dxy_return_20d",
+        "dxy_return_z_90d",
+        "us10y_yield",
+        "us10y_change_20d_bps",
+        "us10y_change_z_90d",
+        "spx_close",
+        "btc_spx_corr_30d",
     ]
     available_raw_columns = [column for column in raw_ffill_columns if column in features.columns]
     if available_raw_columns:
@@ -352,6 +500,9 @@ def build_market_features(df_ohlcv: pd.DataFrame) -> tuple[pd.DataFrame, pd.Data
         features["open_interest_z_30d"] = _rolling_z(features["open_interest_value"], 30, 10)
     elif "open_interest_value" in features and features["open_interest_z_30d"].isna().all():
         features["open_interest_z_30d"] = _rolling_z(features["open_interest_value"], 30, 10)
+    if "open_interest_value" in features:
+        features["open_interest_delta_1d"] = features["open_interest_value"].pct_change()
+        features["open_interest_delta_z_30d"] = _rolling_z(features["open_interest_delta_1d"], 30, 10)
     if "unique_addresses" in features:
         features["unique_addresses_z_30d"] = _rolling_z(features["unique_addresses"], 30, 10)
     if "tx_count" in features:
@@ -364,6 +515,44 @@ def build_market_features(df_ohlcv: pd.DataFrame) -> tuple[pd.DataFrame, pd.Data
     ]
     if onchain_inputs:
         features["onchain_activity_z_30d"] = features[onchain_inputs].mean(axis=1, skipna=True)
+
+    price_return_1d = close.pct_change().reset_index(drop=True)
+    price_return_3d = close.pct_change(3).reset_index(drop=True)
+    if "open_interest_delta_1d" in features:
+        oi_delta = features["open_interest_delta_1d"]
+        conditions = [
+            (oi_delta > 0) & (price_return_1d > 0),
+            (oi_delta > 0) & (price_return_1d < 0),
+            (oi_delta < 0) & (price_return_1d > 0),
+            (oi_delta < 0) & (price_return_1d < 0),
+        ]
+        choices = ["long_build", "short_build", "short_cover", "long_unwind"]
+        features["oi_price_state_1d"] = np.select(conditions, choices, default=None)
+
+    if "funding_rate_z_30d" in features:
+        funding_z = pd.to_numeric(features["funding_rate_z_30d"], errors="coerce")
+        mismatch_mask = (
+            funding_z.notna()
+            & price_return_3d.notna()
+            & (np.sign(funding_z) * np.sign(price_return_3d) < 0)
+        )
+        features["funding_price_divergence_3d"] = pd.Series(
+            np.where(mismatch_mask, np.abs(funding_z), -np.abs(funding_z)),
+            index=features.index,
+            dtype="float64",
+        )
+        features["funding_contrarian_bias_3d"] = pd.Series(
+            np.select(
+                [
+                    (price_return_3d > 0) & (funding_z < 0),
+                    (price_return_3d < 0) & (funding_z > 0),
+                ],
+                [1, -1],
+                default=0,
+            ),
+            index=features.index,
+            dtype="int64",
+        )
 
     for column in MARKET_FEATURE_COLUMNS:
         if column not in features.columns:
