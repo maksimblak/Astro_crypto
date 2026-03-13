@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -31,6 +33,8 @@ PIPELINE_STEPS = [
 _STATUS_LOCK = threading.Lock()
 _RUN_LOCK = threading.Lock()
 _THREAD: threading.Thread | None = None
+_ACTIVE_CHILD: subprocess.Popen | None = None
+_ACTIVE_CHILD_LOCK = threading.Lock()
 
 
 def _now_iso() -> str:
@@ -152,7 +156,56 @@ def auto_update_startup_delay_seconds() -> int:
     return _read_int_env("ASTROBTC_AUTO_UPDATE_STARTUP_DELAY_SECONDS", DEFAULT_STARTUP_DELAY_SECONDS, minimum=0)
 
 
+def _kill_child_process(proc: subprocess.Popen):
+    """Kill a child process and its entire process group."""
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        proc.wait(timeout=3)
+
+
+def _cleanup_active_child():
+    """Kill any active child on parent shutdown (atexit / signal)."""
+    global _ACTIVE_CHILD
+    with _ACTIVE_CHILD_LOCK:
+        if _ACTIVE_CHILD is not None:
+            _kill_child_process(_ACTIVE_CHILD)
+            _ACTIVE_CHILD = None
+
+
+def _kill_orphan_scripts():
+    """Best-effort kill of orphaned pipeline scripts from previous runs."""
+    script_names = {Path(args[-1]).name for _, args in PIPELINE_STEPS}
+    try:
+        out = subprocess.run(
+            ["pgrep", "-f", "|".join(script_names)],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in out.stdout.strip().splitlines():
+            pid = int(line.strip())
+            if pid == os.getpid():
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
 def run_update_pipeline() -> bool:
+    global _ACTIVE_CHILD
+
     if not _RUN_LOCK.acquire(blocking=False):
         return False
 
@@ -162,6 +215,8 @@ def run_update_pipeline() -> bool:
         return False
 
     try:
+        _kill_orphan_scripts()
+
         with _STATUS_LOCK:
             _write_status(
                 {
@@ -177,38 +232,59 @@ def run_update_pipeline() -> bool:
             with _STATUS_LOCK:
                 _write_status({"last_stage": stage_name})
             try:
-                completed = subprocess.run(
+                proc = subprocess.Popen(
                     command,
                     cwd=str(BASE_DIR),
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
-                    check=False,
-                    timeout=600,
+                    start_new_session=True,
                 )
-            except subprocess.TimeoutExpired:
-                _append_log(f"{stage_name} TIMEOUT", "Killed after 600s")
+                with _ACTIVE_CHILD_LOCK:
+                    _ACTIVE_CHILD = proc
+                try:
+                    stdout, stderr = proc.communicate(timeout=600)
+                except subprocess.TimeoutExpired:
+                    _kill_child_process(proc)
+                    _append_log(f"{stage_name} TIMEOUT", "Killed after 600s")
+                    with _STATUS_LOCK:
+                        _write_status(
+                            {
+                                "running": False,
+                                "last_finished_at": _now_iso(),
+                                "last_error": f"{stage_name} timed out after 600s",
+                                "last_stage": stage_name,
+                            }
+                        )
+                    return False
+                finally:
+                    with _ACTIVE_CHILD_LOCK:
+                        _ACTIVE_CHILD = None
+            except OSError as exc:
+                _append_log(f"{stage_name} LAUNCH FAILED", str(exc))
                 with _STATUS_LOCK:
                     _write_status(
                         {
                             "running": False,
                             "last_finished_at": _now_iso(),
-                            "last_error": f"{stage_name} timed out after 600s",
+                            "last_error": f"{stage_name} failed to launch: {exc}",
                             "last_stage": stage_name,
                         }
                     )
                 return False
-            output = (completed.stdout or "").strip()
-            error_output = (completed.stderr or "").strip()
-            combined_output = "\n".join(part for part in [output, error_output] if part)
-            _append_log(f"{stage_name} rc={completed.returncode}", combined_output)
 
-            if completed.returncode != 0:
+            output = (stdout or "").strip()
+            error_output = (stderr or "").strip()
+            combined_output = "\n".join(part for part in [output, error_output] if part)
+            _append_log(f"{stage_name} rc={proc.returncode}", combined_output)
+
+            if proc.returncode != 0:
                 with _STATUS_LOCK:
                     _write_status(
                         {
                             "running": False,
                             "last_finished_at": _now_iso(),
-                            "last_error": f"{stage_name} failed with rc={completed.returncode}",
+                            "last_error": f"{stage_name} failed with rc={proc.returncode}",
                             "last_stage": stage_name,
                         }
                     )
@@ -263,6 +339,8 @@ def start_auto_updater() -> threading.Thread | None:
 
     if _THREAD and _THREAD.is_alive():
         return _THREAD
+
+    atexit.register(_cleanup_active_child)
 
     _THREAD = threading.Thread(
         target=_auto_update_loop,

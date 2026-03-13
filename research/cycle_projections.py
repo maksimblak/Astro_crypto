@@ -38,13 +38,9 @@ CYCLE_TOPS_CONFIRMED = [
 ]
 CYCLE_TOP_PRICES_CONFIRMED = [31.91, 1177.0, 19783.0, 69000.0]
 
-# Current ATH — NOT a confirmed cycle top (cycle may still be ongoing)
-CURRENT_ATH_DATE = date(2025, 1, 20)
-CURRENT_ATH_PRICE = 109114.0
-
-# All tops including current ATH (for display purposes)
-CYCLE_TOPS = [*CYCLE_TOPS_CONFIRMED, CURRENT_ATH_DATE]
-CYCLE_TOP_PRICES = [*CYCLE_TOP_PRICES_CONFIRMED, CURRENT_ATH_PRICE]
+# Current ATH — fallback if no OHLCV data passed; overridden dynamically in build_projections()
+CURRENT_ATH_DATE = date(2025, 10, 6)
+CURRENT_ATH_PRICE = 124752.0
 
 CYCLE_BOTTOMS = [
     date(2011, 11, 18),
@@ -233,8 +229,12 @@ def project_next_peak(reference_date: date | None = None) -> dict:
 
 # ── Diminishing Returns Model ─────────────────────────────────────
 
-def diminishing_returns_projection() -> dict:
-    """Project current and next cycle based on diminishing returns pattern."""
+def diminishing_returns_projection(ath_price: float | None = None) -> dict:
+    """Project current and next cycle based on diminishing returns pattern.
+
+    Args:
+        ath_price: Actual ATH from OHLCV data. Falls back to CURRENT_ATH_PRICE constant.
+    """
     # Calculate ROI per CONFIRMED cycle only (bottom to confirmed top)
     confirmed_rois = []
     for i, (bottom_price, top_price) in enumerate(
@@ -259,7 +259,7 @@ def diminishing_returns_projection() -> dict:
 
     # Current cycle (ongoing, unconfirmed)
     current_bottom = CYCLE_BOTTOM_PRICES[-1]  # $15460
-    current_ath = CURRENT_ATH_PRICE  # $109114 (ATH, not confirmed top)
+    current_ath = ath_price if ath_price else CURRENT_ATH_PRICE
     current_roi_actual = current_ath / current_bottom
 
     # What the decay model projected for current cycle
@@ -351,6 +351,7 @@ def build_projections(
     dates = pd.to_datetime(df_ohlcv.index)
 
     current_price = float(close.iloc[-1])
+    ath_price = float(close.max())
 
     # Moving averages (with NaN guard)
     sma200_raw = close.rolling(200, min_periods=200).mean().iloc[-1]
@@ -383,7 +384,7 @@ def build_projections(
     timing = project_next_peak(reference_date)
 
     # 4. Diminishing Returns
-    dim_returns = diminishing_returns_projection()
+    dim_returns = diminishing_returns_projection(ath_price=ath_price)
 
     # 5. Mayer Multiple
     mm = mayer_multiple(current_price, sma200)
